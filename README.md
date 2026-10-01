@@ -125,30 +125,61 @@
 
 ---
 
-## 🚀 极速上手开发指南
+## 🚀 极速上手指南
 
-### 环境要求
-- Python 3.10+ (推荐使用 [uv](https://github.com/astral-sh/uv) 极速包管理器)
-- Node.js 18+ 与 npm
+### 1. 环境准备
+- **Python 3.10+** (强烈推荐使用现代包管理器 [uv](https://github.com/astral-sh/uv))
+- **Node.js 18+** 与 npm
+- **Tushare Token** (免费注册获取：https://tushare.pro/register)
 
-### 本地一键启动
+### 2. 克隆与基础环境配置
 
 ```bash
 # 1. 克隆代码仓库
-git clone https://github.com/jorben/etf-grid-design.git
-cd etf-grid-design
+git clone https://github.com/JionLin/etf-grid-pro.git
+cd etf-grid-pro
 
-# 2. 安装 Python 依赖并启动后端服务（端口 5001）
+# 2. 初始化环境变量（⚠️ 首次运行必做）
+cp .env.example .env
+# 打开 .env 文件，将你的真实 Tushare Token 填入：
+# TUSHARE_TOKEN=your_real_tushare_token_here
+
+# 3. 安装依赖（首次运行必做）
+# 3.1 Python 依赖 (由 uv 自动同步)
 uv sync
+
+# 3.2 前端依赖 (也可直接执行 start.sh 自动补齐)
+cd frontend && npm install && cd ..
+```
+
+---
+
+### 3. 服务启动（二选一）
+
+#### 选项 A：一键极速启动（推荐）
+项目根目录下提供了内置环境预检与自动补齐的一键守护脚本：
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+#### 选项 B：分步开发者调试模式
+如果你需要同时查看前后端详细日志或进行算法断点调试：
+```bash
+# 终端 1：启动后端服务 (端口 5001)
 uv run python backend/app.py
 
-# 3. 运行全套量化算法与状态机测试 (34+ 测试全绿通过)
-uv run pytest backend/tests/ -v
-
-# 4. 在新终端安装前端依赖并启动前端开发服务器（端口 3000）
+# 终端 2：启动前端热重载服务 (端口 3000)
 cd frontend
-npm install
 npm run dev
+```
+
+---
+
+### 4. 算法与状态机测试验证
+在正式使用前，建议运行全套回归测试套件确保本地算力与状态机正常：
+```bash
+uv run pytest backend/tests/ -v
 ```
 
 启动完成后，打开浏览器访问：👉 **http://localhost:3000**
