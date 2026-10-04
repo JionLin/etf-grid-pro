@@ -371,6 +371,7 @@ class GridBacktestEngine:
 
         # 1. 账户初始化 (50% 现金 + 50% 底仓)
         start_price = float(df.iloc[0]["open"] if "open" in df.columns else df.iloc[0]["close"])
+        start_date_str = pd.to_datetime(df.iloc[0][date_col]).strftime("%Y-%m-%d")
         initial_capital = float(total_capital)
         target_base_capital = initial_capital * 0.5
         base_shares = int(target_base_capital / start_price / 100) * 100
@@ -480,7 +481,20 @@ class GridBacktestEngine:
                     rail_stats[slot.rail]["trades_count"] += 1
                     rail_stats[slot.rail]["profit"] += profit
 
-                # 记录卖出流水明细 (展现真实利润)
+                # 计算持仓周期与对冲进价
+                is_base = (slot.buy_date == "INIT" or not slot.buy_date)
+                entry_dt_str = start_date_str if is_base else slot.buy_date
+                try:
+                    cur_dt = pd.to_datetime(date_str)
+                    ent_dt = pd.to_datetime(entry_dt_str)
+                    holding_days = max(0, (cur_dt - ent_dt).days)
+                except Exception:
+                    holding_days = 0
+
+                entry_price = slot.buy_price if (not is_base and slot.buy_price > 0) else start_price
+                trade_return_pct = round(((slot.sell_price - entry_price) / entry_price) * 100, 2) if entry_price > 0 else 0.0
+
+                # 记录卖出流水明细 (展现真实利润与持仓周期)
                 trades.append({
                     "trade_time": f"{date_str} 14:1{slot.level % 10}",
                     "date": date_str,
@@ -496,6 +510,11 @@ class GridBacktestEngine:
                     "tag": slot.tag,
                     "slot_id": slot.slot_id,
                     "slot_type": slot.slot_type,
+                    "entry_date": entry_dt_str,
+                    "entry_price": round(entry_price, 3),
+                    "holding_days": holding_days,
+                    "trade_return_pct": trade_return_pct,
+                    "is_base_position": is_base,
                 })
 
                 # 槽位状态转移：由 WAIT_SELL 重置回 WAIT_BUY (释放该档，允许再吸)
@@ -548,6 +567,11 @@ class GridBacktestEngine:
                     "tag": slot.tag,
                     "slot_id": slot.slot_id,
                     "slot_type": slot.slot_type,
+                    "entry_date": None,
+                    "entry_price": None,
+                    "holding_days": None,
+                    "trade_return_pct": None,
+                    "is_base_position": False,
                 })
 
                 # 槽位状态转移：由 WAIT_BUY 锁定为 WAIT_SELL (已持仓，严禁重复买)
