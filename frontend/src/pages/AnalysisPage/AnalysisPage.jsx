@@ -32,6 +32,7 @@ const AnalysisPage = () => {
   const [showParameterForm, setShowParameterForm] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+  const [backtestMeta, setBacktestMeta] = useState(null);
 
   // 引用
   const parameterFormRef = useRef(null);
@@ -58,6 +59,7 @@ const AnalysisPage = () => {
 
     setParamErrors(validation.errors);
     setCurrentParams(validation.params);
+    setBacktestMeta(null);
 
     // 参数被修正时先改 URL，下一轮再分析，避免同一份请求打两次
     if (validation.errors.length > 0) {
@@ -321,11 +323,26 @@ const AnalysisPage = () => {
                     <>
                       <span>|</span>
                       <span>
-                        基准价：
+                        实盘自定义：
                         <span className="text-blue-700 font-semibold font-mono">
                           ¥{currentParams.benchmarkPrice}
                         </span>
-                        <span className="text-[10px] text-gray-500 ml-0.5">(自定义)</span>
+                      </span>
+                    </>
+                  )}
+                  {backtestMeta?.backtest_base_price != null && (
+                    <>
+                      <span>|</span>
+                      <span>
+                        回测铺网：
+                        <span className="text-blue-700 font-semibold font-mono">
+                          ¥{Number(backtestMeta.backtest_base_price).toFixed(3)}
+                        </span>
+                        {backtestMeta.latest_market_price != null && (
+                          <span className="text-[10px] text-gray-500 ml-0.5">
+                            (现价 ¥{Number(backtestMeta.latest_market_price).toFixed(3)})
+                          </span>
+                        )}
                       </span>
                     </>
                   )}
@@ -373,6 +390,7 @@ const AnalysisPage = () => {
             onBackToInput={handleBackToHome}
             onReAnalysis={handleReAnalysis}
             onApplyArchiveParams={handleApplyArchiveParams}
+            onHistoryMeta={setBacktestMeta}
             showShareButton={true}
           />
         )}

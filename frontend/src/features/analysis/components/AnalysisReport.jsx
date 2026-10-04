@@ -39,6 +39,7 @@ const AnalysisReport = ({
   onBackToInput,
   onReAnalysis,
   onApplyArchiveParams,
+  onHistoryMeta,
 }) => {
   const [activeTab, setActiveTab] = useState("overview");
   const { shareContent } = useShare();
@@ -214,7 +215,7 @@ const AnalysisReport = ({
 
       {backtestProps && (
         <div className={showBacktest ? undefined : "hidden"}>
-          <BacktestCard {...backtestProps} />
+          <BacktestCard {...backtestProps} onHistoryMeta={onHistoryMeta} />
         </div>
       )}
 

@@ -5,9 +5,6 @@ import {
   Quote,
   Sparkles,
   ChevronRight,
-  ShieldCheck,
-  TrendingUp,
-  Award,
   RefreshCw,
 } from "lucide-react";
 import { getEdaLiterature } from "@shared/services/api";
@@ -126,7 +123,7 @@ const EdaLiteratureDrawer = ({ isOpen, onClose }) => {
       if (trimmed.startsWith("*   ") || trimmed.startsWith("- ")) {
         return (
           <li key={idx} className="ml-5 list-disc text-sm text-gray-700 my-1 leading-relaxed">
-            {renderInlineMarkdown(trimmed.replace(/^(\*\s+|\-\s+)/, ""))}
+            {renderInlineMarkdown(trimmed.replace(/^(\*\s+|-\s+)/, ""))}
           </li>
         );
       }
@@ -150,7 +147,7 @@ const EdaLiteratureDrawer = ({ isOpen, onClose }) => {
             key={idx}
             className="my-3 p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs text-slate-500 text-center font-mono"
           >
-            📊 {trimmed.replace(/^[\*\(\]]+|[\*\)\]]+$/g, "")}
+            📊 {trimmed.replace(/^[*(\]]+|[*)\\]]+$/g, "")}
           </div>
         );
       }
@@ -295,7 +292,7 @@ const EdaLiteratureDrawer = ({ isOpen, onClose }) => {
                       </span>
                     </div>
                     <p className="text-xs text-amber-950/90 leading-relaxed font-serif italic">
-                      "{quoteInfo.quote}"
+                      &ldquo;{quoteInfo.quote}&rdquo;
                     </p>
                   </div>
                 )}

@@ -86,6 +86,7 @@ const BacktestCard = ({
   edaStepRatios = null,
   edaSteps = null,
   atrMultipliers = null,
+  onHistoryMeta,
 }) => {
   const safeTotalCapital = Number(totalCapital || 30000);
   const [backtestDays, setBacktestDays] = useState(initialDays);
@@ -128,6 +129,8 @@ const BacktestCard = ({
       if (signal?.aborted) return;
       if (res?.success && res.data) {
         setBacktestData(res.data);
+        const meta = res.data.summary?.history_meta || res.data.history_meta || null;
+        if (onHistoryMeta) onHistoryMeta(meta);
       } else {
         setError(res?.error || "回测数据获取失败");
       }
@@ -156,10 +159,10 @@ const BacktestCard = ({
     return calculateProfitAttribution(summary, profitPool);
   }, [summary, profitPool]);
 
-  // 分轨过滤
+  // 分轨过滤与时间倒序排序 (最新成交优先置顶)
   const filteredTrades = useMemo(() => {
-    if (selectedRail === "all") return allTrades;
-    return allTrades.filter((t) => t.rail === selectedRail);
+    const list = selectedRail === "all" ? allTrades : allTrades.filter((t) => t.rail === selectedRail);
+    return [...list].sort((a, b) => (b.trade_time || "").localeCompare(a.trade_time || ""));
   }, [allTrades, selectedRail]);
 
   // 分轨专项统计
@@ -193,7 +196,19 @@ const BacktestCard = ({
   // 导出 CSV
   const handleExportCsv = () => {
     if (!filteredTrades.length) return;
-    const headers = ["成交时间", "动作", "轨道", "成交价格(元)", "成交股数", "成交金额(元)", "手续费(元)", "扣费净利(元)"];
+    const headers = [
+      "成交时间",
+      "动作",
+      "轨道",
+      "成交价格(元)",
+      "成交股数",
+      "成交金额(元)",
+      "持有天数",
+      "对冲进价(元)",
+      "单笔收益率",
+      "手续费(元)",
+      "扣费净利(元)",
+    ];
     const rows = filteredTrades.map((t) => [
       t.trade_time,
       t.action_label || (t.action === "SELL" ? "卖出" : "买入"),
@@ -201,6 +216,9 @@ const BacktestCard = ({
       Number(t.price).toFixed(3),
       t.shares,
       t.amount,
+      t.action === "SELL" ? (t.holding_days != null ? `${t.holding_days}天` : "0天") : "-",
+      t.action === "SELL" ? (t.entry_price != null ? Number(t.entry_price).toFixed(3) : "-") : "-",
+      t.action === "SELL" ? (t.trade_return_pct != null ? `${t.trade_return_pct}%` : "-") : "-",
       t.fee,
       t.action === "SELL" ? t.profit : "0.00",
     ]);
@@ -453,12 +471,17 @@ const BacktestCard = ({
         </div>
 
         {anchorMode === "auto" ? (
-          <div className="text-slate-500 font-mono flex items-center gap-1.5">
-            <span>当前铺网基准:</span>
+          <div className="text-slate-500 font-mono flex flex-wrap items-center gap-1.5">
+            <span>回测铺网:</span>
             <span className="font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
               ¥{summary?.history_meta?.backtest_base_price ? Number(summary.history_meta.backtest_base_price).toFixed(3) : "..."}
             </span>
-            <span className="text-[11px] text-slate-400 font-sans">(消除未来函数)</span>
+            <span className="text-slate-300">|</span>
+            <span>最新市价:</span>
+            <span className="font-bold text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded">
+              ¥{summary?.history_meta?.latest_market_price ? Number(summary.history_meta.latest_market_price).toFixed(3) : "..."}
+            </span>
+            <span className="text-[11px] text-slate-400 font-sans">(铺网用窗口首日开盘，消除未来函数，不是现价)</span>
           </div>
         ) : (
           <div className="flex items-center gap-1.5">
@@ -1512,6 +1535,7 @@ const BacktestCard = ({
                         <th className="py-2.5 px-4 font-semibold">成交价格</th>
                         <th className="py-2.5 px-4 font-semibold">股数</th>
                         <th className="py-2.5 px-4 font-semibold">成交金额</th>
+                        <th className="py-2.5 px-4 font-semibold">持有周期</th>
                         <th className="py-2.5 px-4 font-semibold">手续费</th>
                         <th className="py-2.5 px-4 font-semibold">落袋净利</th>
                       </tr>
@@ -1519,7 +1543,7 @@ const BacktestCard = ({
                     <tbody className="divide-y divide-gray-100">
                       {paginatedTrades.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-6 text-center text-gray-400">
+                          <td colSpan={9} className="py-6 text-center text-gray-400">
                             该轨道暂无成交记录
                           </td>
                         </tr>
@@ -1549,6 +1573,84 @@ const BacktestCard = ({
                             <td className="py-2 px-4 font-bold text-gray-900">¥{Number(t.price).toFixed(3)}</td>
                             <td className="py-2 px-4">{t.shares?.toLocaleString()} 股</td>
                             <td className="py-2 px-4">¥{t.amount?.toLocaleString()}</td>
+                            <td className="py-2 px-4 relative group">
+                              {t.action === "BUY" ? (
+                                <span className="text-gray-400 font-sans text-[11px]">— (待抛)</span>
+                              ) : (() => {
+                                const days = t.holding_days != null ? t.holding_days : 0;
+                                const isBase = !!t.is_base_position;
+                                const returnPct = t.trade_return_pct;
+                                const entryPrice = t.entry_price;
+                                const entryDate = t.entry_date;
+
+                                let badgeClass = "bg-gray-100 text-gray-700 border-gray-200";
+                                let badgeIcon = "⏳";
+                                let badgeText = `${days}天`;
+
+                                if (isBase) {
+                                  badgeClass = "bg-amber-50 text-amber-800 border-amber-300";
+                                  badgeIcon = "⏳";
+                                  badgeText = days === 0 ? "0天 (底仓)" : `${days}天 (底仓)`;
+                                } else if (days <= 2) {
+                                  badgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                                  badgeIcon = "⚡";
+                                  badgeText = days === 0 ? "0天 (日内)" : `${days}天`;
+                                } else if (days <= 7) {
+                                  badgeClass = "bg-blue-50 text-blue-700 border-blue-200";
+                                  badgeIcon = "🌊";
+                                  badgeText = `${days}天`;
+                                } else if (days <= 20) {
+                                  badgeClass = "bg-indigo-50 text-indigo-700 border-indigo-200";
+                                  badgeIcon = "⚓";
+                                  badgeText = `${days}天`;
+                                } else {
+                                  badgeClass = "bg-amber-50 text-amber-800 border-amber-300";
+                                  badgeIcon = "⏳";
+                                  badgeText = `${days}天 (长波段)`;
+                                }
+
+                                const isTopRows = idx < 3;
+                                const popoverPosition = isTopRows ? "top-full mt-2" : "bottom-full mb-2";
+
+                                return (
+                                  <>
+                                    <div className="inline-flex items-center cursor-pointer">
+                                      <span
+                                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-sans font-semibold border ${badgeClass}`}
+                                      >
+                                        <span>{badgeIcon}</span>
+                                        <span>{badgeText}</span>
+                                      </span>
+                                    </div>
+                                    {/* 悬停浮动对账卡片 */}
+                                    <div className={`absolute left-1/2 -translate-x-1/2 ${popoverPosition} hidden group-hover:block z-50 w-60 p-3 bg-gray-900/95 backdrop-blur-xs text-white text-xs rounded-xl shadow-2xl pointer-events-none transition-all border border-gray-700`}>
+                                      <div className="font-bold border-b border-gray-700 pb-1 mb-1.5 flex items-center justify-between text-indigo-300 font-sans">
+                                        <span>做 T 撮合配对详情</span>
+                                        <span className="text-[10px] text-gray-400 font-mono">{t.slot_id || t.rail}</span>
+                                      </div>
+                                      <div className="space-y-1 font-mono text-[11px]">
+                                        <div className="flex justify-between text-gray-300">
+                                          <span className="font-sans text-gray-400">买入建仓:</span>
+                                          <span>{entryDate || "..."} @ ¥{entryPrice != null ? Number(entryPrice).toFixed(3) : "—"}</span>
+                                        </div>
+                                        <div className="flex justify-between text-gray-300">
+                                          <span className="font-sans text-gray-400">卖出平仓:</span>
+                                          <span className="text-white font-bold">{t.trade_time.slice(0, 10)} @ ¥{Number(t.price).toFixed(3)}</span>
+                                        </div>
+                                        <div className="border-t border-gray-800 pt-1 mt-1 flex justify-between">
+                                          <span className="font-sans text-gray-400">资金占用:</span>
+                                          <span className="text-amber-300 font-bold">{days} 天 {isBase ? "(开网底仓)" : "(波段做T)"}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                          <span className="font-sans text-gray-400">价差净利:</span>
+                                          <span className="text-emerald-400 font-bold">+¥{t.profit} {returnPct != null ? `(${returnPct > 0 ? "+" : ""}${returnPct}%)` : ""}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </td>
                             <td className="py-2 px-4 text-gray-400">¥{t.fee}</td>
                             <td className="py-2 px-4 font-bold text-red-600 font-sans">
                               {t.action === "SELL" ? `+¥${t.profit}` : "-"}

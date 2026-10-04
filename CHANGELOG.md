@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Changed
+- **双锚点口径披露**: 分析报告把实盘挂单锚点（默认最新收盘）与回测铺网锚点（窗口首日开盘）并排写出。回测仍按首日开盘铺网，这次只澄清展示，不改撮合定价。
+- **公众号实测复现预设**: 增加 10 万 / ATR / 模式 B / 等额加码 0 / 1825 天的官方预设。首页驾驶舱默认加码 10% 与矩阵 3 万协议不变。
+
 ## [0.5.0] - 2026-09-12
 ### :sparkles: Major Features (5年大周期长时序回测与本地 SQLite 策略档案库)
 - **5年跨牛熊大周期回测**: 将回测历史跨度从原本的 90/180/365 天扩展至 730天（2年）、1095天（3年）与 1825天（5年康波/牛熊大周期），并支持次新 ETF 上市时间平滑自适应与审计元数据回传。

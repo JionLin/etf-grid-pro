@@ -215,3 +215,10 @@ __marimo__/
 *.db-wal
 *.db-shm
 *.db-journal
+
+# Auto-added standard system & cache ignores
+.DS_Store
+*.pyc
+.idea/
+*.iml
+.vscode/

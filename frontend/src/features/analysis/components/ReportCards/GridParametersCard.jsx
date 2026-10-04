@@ -241,11 +241,14 @@ const GridParametersCard = ({
               ¥{Number(benchmarkPrice || current_price).toFixed(3)}
             </div>
             <div className="text-sm text-gray-700 font-medium">
-              {isCustomBenchmark ? "基准锚点 (自定义)" : "基准价格"}
+              {isCustomBenchmark ? "基准锚点 (自定义)" : "实盘挂单锚点"}
             </div>
             <div className="text-xs text-gray-600 mt-1">
               {isCustomBenchmark ? `当前市场现价: ¥${current_price.toFixed(3)}` : getPriceDateText()}
             </div>
+            <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+              这是现在要挂的价，不是五年回测铺网价。回测铺网价见下方回测卡（窗口首日开盘，可与现价不同）。挂单步长来自近端 ATR（分析周期可能被夹成 180 天），五年战绩以回测卡为准。
+            </p>
           </div>
 
           <div className="text-center p-4 bg-red-50 rounded-lg">
@@ -821,7 +824,7 @@ const GridParametersCard = ({
                             <tr key="current_anchor" className="bg-blue-50/90 border-y-2 border-blue-300 font-sans">
                               <td className="py-2.5 px-3 font-bold text-blue-900 flex items-center gap-1.5">
                                 <span className="inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-                                {isCustomBenchmark ? "【基准锚点】" : "【现价基准】"}
+                                {isCustomBenchmark ? "【基准锚点】" : "【实盘挂单】"}
                               </td>
                               <td className="py-2.5 px-3 text-base font-bold text-blue-900 font-mono">
                                 ¥{Number(benchmarkPrice || current_price).toFixed(3)}

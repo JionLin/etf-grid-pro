@@ -87,7 +87,29 @@ function runTests() {
   if (draft.current.totalCapital !== "30000" || draft.current.reinvestMode !== "pool_shares") {
     throw new Error("期望恢复为官方出厂标准默认配置");
   }
+  if (draft.current.stepMode !== "atr" || Number(draft.current.scalingRatio) !== 0.1) {
+    throw new Error("期望出厂默认仍为 ATR 与加码 10%");
+  }
   console.log("  ✓ 一键恢复出厂默认配置正常");
+
+  // 6. 公众号实测复现预设锁参
+  const wechat = SYSTEM_PRESETS.find((item) => item.id === "wechat_repro");
+  if (!wechat) {
+    throw new Error("期望存在公众号实测复现预设");
+  }
+  if (wechat.params.totalCapital !== "100000" || wechat.params.analysisDays !== 1825) {
+    throw new Error("期望公众号预设为本金 10 万、周期 1825 天");
+  }
+  if (Number(wechat.params.scalingRatio) !== 0 || wechat.params.enableScaling !== false) {
+    throw new Error("期望公众号预设为等额加码 0");
+  }
+  if (wechat.params.stepMode !== "atr" || wechat.params.reinvestMode !== "pool_shares") {
+    throw new Error("期望公众号预设为 ATR 模式 B");
+  }
+  if (wechat.params.atrMultipliers.small !== 0.6 || wechat.params.atrMultipliers.large !== 2.5) {
+    throw new Error("期望公众号预设使用默认 ATR 乘数");
+  }
+  console.log("  ✓ 公众号实测复现预设锁参正常");
 
   console.log("🎉 strategyDraftStorage 全部测试通过！");
 }
