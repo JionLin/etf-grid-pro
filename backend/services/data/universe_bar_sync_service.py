@@ -9,6 +9,7 @@ import pandas as pd
 from repositories.etf_pool_repository import ETFPoolRepository
 from repositories.market_data_repository import MarketDataRepository
 from services.data.akshare_client import AkShareClient
+from services.data.market_clock import SHANGHAI, as_shanghai
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class UniverseBarSyncService:
 
     def get_default_5y_dates(self) -> Tuple[str, str]:
         """计算默认 5 年起止日期 (YYYY-MM-DD)"""
-        now = datetime.now()
+        now = as_shanghai(datetime.now(SHANGHAI)).replace(tzinfo=None)
         end_date = now.strftime("%Y-%m-%d")
         start_date = (now - timedelta(days=5 * 365 + 30)).strftime("%Y-%m-%d")
         return start_date, end_date
@@ -63,8 +64,9 @@ class UniverseBarSyncService:
         # 智能断点续传与增量跳过判定
         if not force_reload and local_count > 0 and local_max:
             latest_dt = datetime.strptime(local_max, "%Y-%m-%d")
-            days_lag = (datetime.now() - latest_dt).days
-            is_weekend = datetime.now().weekday() >= 5
+            now = as_shanghai(datetime.now(SHANGHAI)).replace(tzinfo=None)
+            days_lag = (now - latest_dt).days
+            is_weekend = now.weekday() >= 5
             
             # 增量模式：如果本地最新日期是最近 3 天（或周末 <=4 天），说明已处于最新交易日，无需拉取
             if is_incremental:

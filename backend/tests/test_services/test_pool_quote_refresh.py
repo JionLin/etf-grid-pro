@@ -1,6 +1,7 @@
 """标的池已落库后，首页最新价必须改用实时行情，不能停在建池当日。"""
 import threading
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -44,7 +45,7 @@ def test_cached_pool_replaces_previous_close_with_live_quote():
     coal = next(item for item in refreshed if item["etf_code"] == "515220")
     assert coal["latest_price"] == 1.303
     assert coal["pct_change"] == 0.851
-    assert coal["quote_date"] == AkShareClient.quote_date_label(datetime.now())
+    assert coal["quote_date"] == AkShareClient.quote_date_label(datetime.now(ZoneInfo("Asia/Shanghai")))
     client.pool_repo.update_quotes.assert_called_once()
     saved = client.pool_repo.update_quotes.call_args.args[0]
     assert ("515220", 1.303, 0.851) in saved
@@ -163,3 +164,12 @@ def test_quote_date_label_rolls_back_before_open_and_weekend():
     assert AkShareClient.quote_date_label(datetime(2026, 10, 15, 10, 0)) == "2026-10-15"
     assert AkShareClient.quote_date_label(datetime(2026, 10, 12, 8, 0)) == "2026-10-09"
     assert AkShareClient.quote_date_label(datetime(2026, 10, 17, 11, 0)) == "2026-10-16"
+
+
+def test_quote_date_and_gap_follow_trading_calendar():
+    """日历里没有的工作日是休市，不能再当成可交易日。"""
+    national_day = ["20260930", "20261008"]
+    assert AkShareClient.quote_date_label(datetime(2026, 10, 8, 8, 0), national_day) == "2026-09-30"
+    assert AkShareClient.quote_date_label(datetime(2026, 10, 8, 10, 0), national_day) == "2026-10-08"
+    assert AkShareClient.gap_is_only_weekend("2026-09-30", "2026-10-07", national_day) is True
+    assert AkShareClient.gap_is_only_weekend("2026-09-30", "2026-10-08", national_day) is False

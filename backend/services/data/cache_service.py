@@ -2,6 +2,8 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+
+from .market_clock import SHANGHAI, as_shanghai
 from typing import Any, Optional, Dict, List
 import pandas as pd
 
@@ -262,7 +264,7 @@ class TradingDateManager:
         Returns:
             str: 最近的交易日 (YYYYMMDD格式)
         """
-        current_time = datetime.now()
+        current_time = as_shanghai(datetime.now(SHANGHAI))
         current_date = current_time.strftime('%Y%m%d')
         
         # 获取交易日历

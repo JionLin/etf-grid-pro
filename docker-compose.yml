@@ -9,6 +9,7 @@ services:
       - "5001:5001"
     environment:
       - FLASK_ENV=production
+      - TZ=Asia/Shanghai
       - HOST=0.0.0.0
       - PORT=5001
       - TUSHARE_TOKEN=${TUSHARE_TOKEN}

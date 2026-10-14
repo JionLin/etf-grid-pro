@@ -6,7 +6,7 @@
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from repositories.market_data_repository import MarketDataRepository
@@ -14,6 +14,7 @@ from repositories.mysql_connection import DEFAULT_DATABASE, connect
 from repositories.universe_matrix_repository import UniverseMatrixRepository
 from services.analysis.universe_matrix_backtest_service import UniverseMatrixBacktestService
 from services.data.akshare_client import AkShareClient
+from services.data.market_clock import as_shanghai, expected_settled_date, shanghai_now
 from services.data.universe_bar_sync_service import UniverseBarSyncService
 
 logger = logging.getLogger(__name__)
@@ -71,37 +72,24 @@ class StartupSyncService:
             self._status.update(kwargs)
 
     @staticmethod
-    def calculate_expected_settled_date(now: Optional[datetime] = None) -> str:
+    def calculate_expected_settled_date(
+        now: Optional[datetime] = None,
+        trading_days: Optional[list] = None,
+    ) -> str:
         """根据 A 股 15:30 结算规则推算当前应收录的最新交易日 (YYYY-MM-DD)。
 
-        - 周一至周五:
-          - 若当前时间 < 15:30: 属于盘中或未出完整日线，应收录前一交易日；
-          - 若当前时间 >= 15:30: 交易所已出当日完整日线，应收录当日。
-        - 周六、周日: 应收录本周五（或上一有效交易日）。
+        没有交易日历时只排除周末。传入日历后，节假日继续往前找到上一个交易日。
         """
-        current_dt = now or datetime.now()
-        weekday = current_dt.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
-
-        if weekday == 5:  # Saturday -> Friday
-            target = current_dt - timedelta(days=1)
-        elif weekday == 6:  # Sunday -> Friday
-            target = current_dt - timedelta(days=2)
-        else:
-            # Weekday
-            if current_dt.hour < 15 or (current_dt.hour == 15 and current_dt.minute < 30):
-                # 盘中或未结算 -> 期望为前一个交易日 (若是周一则退至周五)
-                if weekday == 0:
-                    target = current_dt - timedelta(days=3)
-                else:
-                    target = current_dt - timedelta(days=1)
-            else:
-                target = current_dt
-
-        return target.strftime("%Y-%m-%d")
+        return expected_settled_date(now, trading_days)
 
     def check_freshness(self, now: Optional[datetime] = None) -> Dict[str, Any]:
         """检查本地日 K 线时序与回测矩阵的新鲜度。"""
-        expected_date = self.calculate_expected_settled_date(now)
+        moment = as_shanghai(now) if now is not None else shanghai_now()
+        trading_days = None
+        loader = getattr(getattr(self, "client", None), "cached_trading_days", None)
+        if callable(loader):
+            trading_days = loader(moment)
+        expected_date = self.calculate_expected_settled_date(now, trading_days)
 
         # 1. 检查代表性核心标的 510300 及全库的最大收录日期
         range_stat = self.market_repo.get_date_range("510300")
@@ -208,7 +196,7 @@ class StartupSyncService:
             cost_matrix = time.time() - t0
             logger.info("✓ 回测矩阵刷新沉淀成功: 共更新 %d 只标的 (耗时 %.2f 秒)", saved_count, cost_matrix)
 
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            now_str = shanghai_now().strftime("%Y-%m-%d %H:%M:%S")
             self._set_status(
                 is_syncing=False,
                 current_stage="completed",

@@ -6,6 +6,12 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
+from .market_clock import (
+    SHANGHAI,
+    as_shanghai,
+    gap_is_only_non_trading,
+    quote_date_label as shanghai_quote_date,
+)
 from .t0_rules import is_t0_instrument
 from .cache_service import EnhancedCache
 try:
@@ -113,8 +119,12 @@ class AkShareClient:
                 self.market_repo.save_bars(clean_code, df)
             return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end)
 
-        # 场景 B: 最新端缺口比对。纯周末缺口不补，中间夹着工作日必须补。
-        if local_max < norm_end and not self.gap_is_only_weekend(local_max, norm_end):
+        # 场景 B: 最新端缺口比对。纯休市缺口不补，中间夹着交易日必须补。
+        if local_max < norm_end and not self.gap_is_only_weekend(
+            local_max,
+            norm_end,
+            self.cached_trading_days(),
+        ):
             try:
                 next_day = (datetime.strptime(local_max, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
                 target_end = end_date.replace("-", "")
@@ -371,8 +381,8 @@ class AkShareClient:
             }
             
             # 4. 检查是否需要缓存（如果是当日数据且还未收盘，则不缓存）
-            current_date = datetime.now().strftime('%Y%m%d')
-            if actual_trading_date == current_date and not self._is_market_closed(datetime.now()):
+            current_date = as_shanghai(datetime.now(SHANGHAI)).strftime('%Y%m%d')
+            if actual_trading_date == current_date and not self._is_market_closed(datetime.now(SHANGHAI)):
                 logger.info(f"→ 当日数据且未收盘，跳过缓存 (交易日: {actual_trading_date})")
             else:
                 self.cache.set_daily_cache(actual_trading_date, "price", etf_code, price_info)
@@ -396,27 +406,20 @@ class AkShareClient:
 
     def _day_cache_is_closed(self, trading_date: str, now: Optional[datetime] = None) -> bool:
         """当天未到 15:00 时，交易日缓存既不能读也不能当收盘价写入。"""
-        current = now or datetime.now()
+        current = as_shanghai(now) if now is not None else as_shanghai(datetime.now(SHANGHAI))
         if str(trading_date) == current.strftime("%Y%m%d") and not self._is_market_closed(current):
             return False
         return True
 
     @staticmethod
-    def quote_date_label(now: datetime) -> str:
-        """行情所属交易日。开盘前和周末沿用上一工作日，节假日留到交易日历修正。"""
-        day = now
-        before_open = now.strftime("%H:%M") < "09:30"
-        if now.weekday() >= 5 or before_open:
-            if now.weekday() < 5 and before_open:
-                day = now - timedelta(days=1)
-            while day.weekday() >= 5:
-                day = day - timedelta(days=1)
-        return day.strftime("%Y-%m-%d")
+    def quote_date_label(now: datetime, trading_days: Optional[List[str]] = None) -> str:
+        """行情所属交易日。开盘前、周末和日历里的休市日沿用上一交易日。"""
+        return shanghai_quote_date(now, trading_days)
 
     def sync_window_history(self, etf_code: str, window_days: int = 1825) -> pd.DataFrame:
         """按协议窗口增量补齐本地日 K。覆盖够时不打 HTTP。"""
         safe_days = max(30, int(window_days))
-        end = datetime.now()
+        end = as_shanghai(datetime.now(SHANGHAI)).replace(tzinfo=None)
         start = end - timedelta(days=safe_days)
         frame = self._sync_and_fill_kline_lake(
             etf_code,
@@ -515,7 +518,7 @@ class AkShareClient:
         Returns:
             str: 最近的交易日 (YYYYMMDD格式)
         """
-        current_time = datetime.now()
+        current_time = as_shanghai(datetime.now(SHANGHAI))
         current_date = current_time.strftime('%Y%m%d')
         
         # 获取当前年份的交易日历
@@ -615,7 +618,7 @@ class AkShareClient:
         try:
             # 获取当前日期和时间
             if current_time is None:
-                current_time = datetime.now()
+                current_time = as_shanghai(datetime.now(SHANGHAI))
             current_date = current_time.strftime('%Y%m%d')
             
             # 如果结束日期不是当天，不需要调整
@@ -992,19 +995,28 @@ class AkShareClient:
             'metrics_status': INSUFFICIENT_DATA_LABEL,
         }
 
+    def cached_trading_days(self, moment: Optional[datetime] = None) -> Optional[List[str]]:
+        """只读已落盘的交易日历，不在行情路径上打网络。"""
+        cache = getattr(self, "cache", None)
+        getter = getattr(cache, "get_permanent_cache", None)
+        if not callable(getter):
+            return None
+        current = as_shanghai(moment)
+        collected: List[str] = []
+        for year in (current.year, current.year - 1):
+            cached = getter("trading_cal", str(year))
+            if isinstance(cached, list):
+                collected.extend(str(day) for day in cached)
+        return collected or None
+
     @staticmethod
-    def gap_is_only_weekend(local_max: str, target_end: str) -> bool:
-        """缺口里全是周六日才算周末缺口。跨过周五的三天空档不能跳过。"""
-        start = datetime.strptime(str(local_max)[:10], "%Y-%m-%d") + timedelta(days=1)
-        end = datetime.strptime(str(target_end)[:10], "%Y-%m-%d")
-        if start > end:
-            return False
-        day = start
-        while day <= end:
-            if day.weekday() < 5:
-                return False
-            day += timedelta(days=1)
-        return True
+    def gap_is_only_weekend(
+        local_max: str,
+        target_end: str,
+        trading_days: Optional[List[str]] = None,
+    ) -> bool:
+        """缺口里没有交易日才跳过。没日历时仍只把周六日当休市。"""
+        return gap_is_only_non_trading(local_max, target_end, trading_days)
 
     @staticmethod
     def pct_change_versus_previous_close(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1080,7 +1092,8 @@ class AkShareClient:
             quotes[code] = (price, pct)
         if not quotes:
             return records
-        quote_date = self.quote_date_label(datetime.now())
+        quote_now = as_shanghai(datetime.now(SHANGHAI))
+        quote_date = self.quote_date_label(quote_now, self.cached_trading_days(quote_now))
         updates = []
         refreshed: List[Dict[str, Any]] = []
         for record in records:
