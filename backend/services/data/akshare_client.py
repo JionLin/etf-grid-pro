@@ -253,8 +253,10 @@ class AkShareClient:
         # 1. 获取最近收盘的交易日
         latest_trading_date = self.get_latest_trading_date()
         
-        # 2. 检查该交易日的缓存
-        cached_data = self.cache.get_daily_cache(latest_trading_date, "price", etf_code)
+        # 2. 仅在已收盘时读取交易日缓存。盘中缓存是上一笔快照，不能当成最新价。
+        cached_data = None
+        if self._day_cache_is_closed(latest_trading_date):
+            cached_data = self.cache.get_daily_cache(latest_trading_date, "price", etf_code)
         if cached_data:
             logger.info(f"✓ 从交易日缓存获取ETF {etf_code} 最新价格 (交易日: {latest_trading_date})")
             self._remember_quote(etf_code, cached_data)
@@ -383,11 +385,33 @@ class AkShareClient:
             logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 最新价格获取失败: {str(e)}")
             fallback = self._get_fallback_quote(etf_code)
             if fallback:
-                self.cache.set_daily_cache(latest_trading_date, "price", etf_code, fallback)
+                if self._day_cache_is_closed(latest_trading_date):
+                    self.cache.set_daily_cache(latest_trading_date, "price", etf_code, fallback)
+                else:
+                    logger.info("备用行情尚未收盘，不写入交易日缓存: %s", etf_code)
                 self._remember_quote(etf_code, fallback)
                 logger.info(f"✓ 通过备用行情源获取ETF {etf_code} 最新价格成功")
                 return fallback
             return None
+
+    def _day_cache_is_closed(self, trading_date: str, now: Optional[datetime] = None) -> bool:
+        """当天未到 15:00 时，交易日缓存既不能读也不能当收盘价写入。"""
+        current = now or datetime.now()
+        if str(trading_date) == current.strftime("%Y%m%d") and not self._is_market_closed(current):
+            return False
+        return True
+
+    @staticmethod
+    def quote_date_label(now: datetime) -> str:
+        """行情所属交易日。开盘前和周末沿用上一工作日，节假日留到交易日历修正。"""
+        day = now
+        before_open = now.strftime("%H:%M") < "09:30"
+        if now.weekday() >= 5 or before_open:
+            if now.weekday() < 5 and before_open:
+                day = now - timedelta(days=1)
+            while day.weekday() >= 5:
+                day = day - timedelta(days=1)
+        return day.strftime("%Y-%m-%d")
 
     def sync_window_history(self, etf_code: str, window_days: int = 1825) -> pd.DataFrame:
         """按协议窗口增量补齐本地日 K。覆盖够时不打 HTTP。"""
@@ -1028,6 +1052,7 @@ class AkShareClient:
             quotes[code] = (price, pct)
         if not quotes:
             return records
+        quote_date = self.quote_date_label(datetime.now())
         updates = []
         refreshed: List[Dict[str, Any]] = []
         for record in records:
@@ -1040,6 +1065,7 @@ class AkShareClient:
             updated = dict(record)
             updated["latest_price"] = price
             updated["pct_change"] = pct
+            updated["quote_date"] = quote_date
             refreshed.append(updated)
             updates.append((code, price, pct))
         if updates:

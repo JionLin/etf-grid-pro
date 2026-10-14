@@ -657,7 +657,9 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                   {/* 第三行：行情与流动性指标 */}
                   <div className="grid grid-cols-2 gap-2 py-2 border-t border-b border-gray-50 dark:border-gray-700/50 text-xs mb-3">
                     <div>
-                      <span className="text-gray-400 block text-[11px]">最新价格</span>
+                      <span className="text-gray-400 block text-[11px]">
+                        最新价格{item.quote_date ? ` · ${item.quote_date}` : ""}
+                      </span>
                       <span className="font-bold font-mono text-gray-800 dark:text-gray-200">
                         ¥{Number(item.latest_price).toFixed(3)}
                       </span>

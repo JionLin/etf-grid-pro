@@ -77,6 +77,7 @@ export default function QuickConfigPanel({
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs font-mono font-semibold text-gray-700 dark:text-gray-300">
                 最新: ¥{price}
+                {selectedEtf.quote_date ? ` (${selectedEtf.quote_date})` : ""}
               </span>
               {pct !== null && (
                 <span
