@@ -113,10 +113,8 @@ class AkShareClient:
                 self.market_repo.save_bars(clean_code, df)
             return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end)
 
-        # 场景 B: 最新端缺口比对 (local_max < norm_end)
-        gap_days = (datetime.strptime(norm_end, "%Y-%m-%d") - datetime.strptime(local_max, "%Y-%m-%d")).days
-        is_weekend = datetime.strptime(norm_end, "%Y-%m-%d").weekday() >= 5
-        if local_max < norm_end and not (is_weekend and gap_days <= 3):
+        # 场景 B: 最新端缺口比对。纯周末缺口不补，中间夹着工作日必须补。
+        if local_max < norm_end and not self.gap_is_only_weekend(local_max, norm_end):
             try:
                 next_day = (datetime.strptime(local_max, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
                 target_end = end_date.replace("-", "")
@@ -993,6 +991,20 @@ class AkShareClient:
             'elasticity': INSUFFICIENT_DATA_LABEL,
             'metrics_status': INSUFFICIENT_DATA_LABEL,
         }
+
+    @staticmethod
+    def gap_is_only_weekend(local_max: str, target_end: str) -> bool:
+        """缺口里全是周六日才算周末缺口。跨过周五的三天空档不能跳过。"""
+        start = datetime.strptime(str(local_max)[:10], "%Y-%m-%d") + timedelta(days=1)
+        end = datetime.strptime(str(target_end)[:10], "%Y-%m-%d")
+        if start > end:
+            return False
+        day = start
+        while day <= end:
+            if day.weekday() < 5:
+                return False
+            day += timedelta(days=1)
+        return True
 
     @staticmethod
     def pct_change_versus_previous_close(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

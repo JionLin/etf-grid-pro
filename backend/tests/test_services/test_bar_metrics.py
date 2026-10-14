@@ -46,6 +46,11 @@ def test_pct_change_uses_previous_close_not_open():
     assert by_date["2026-09-11"] == -2.05
 
 
+def test_weekend_gap_does_not_hide_a_missing_weekday():
+    assert AkShareClient.gap_is_only_weekend("2026-10-16", "2026-10-18") is True
+    assert AkShareClient.gap_is_only_weekend("2026-10-15", "2026-10-18") is False
+
+
 def test_t0_rule_is_shared_by_code_and_name():
     assert is_t0_instrument("159941", "") is True
     assert is_t0_instrument("518880", "黄金ETF") is True
