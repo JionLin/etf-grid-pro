@@ -13,6 +13,7 @@ from services.analysis.grid_fit_service import (
 )
 from repositories.backtest_repository import BacktestRepository
 from repositories.etf_pool_repository import ETFPoolRepository
+from services.analysis.analysis_days import resolve_analysis_days
 
 # 创建分析蓝图
 analysis_bp = Blueprint('analysis', __name__)
@@ -79,10 +80,8 @@ def analyze_etf_strategy():
                 'error': '调节系数应在0.0-2.0之间'
             }), 400
         
-        # 获取分析周期天数（可选参数，默认180天，支持90/180/365）
-        analysis_days = int(data.get('analysisDays', 180))
-        if analysis_days not in [90, 180, 365]:
-            analysis_days = 180
+        # 支持 90/180/365/1825。名单外返回 400，不再静默退回 180。
+        analysis_days = resolve_analysis_days(data.get('analysisDays', 180))
 
         # 获取逐格加码比例（可选参数，默认0.0，范围0.0-0.20）
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))

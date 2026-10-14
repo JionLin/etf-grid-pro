@@ -182,14 +182,23 @@ const AdvancedStrategySection = memo(function AdvancedStrategySection({
             历史分析周期
           </label>
           <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-            {analysisDays === 180 ? "★ 推荐黄金平衡 (半年)" : analysisDays === 90 ? "⚡ 短线高频波动" : "🛡️ 52周大箱体"}
+            {analysisDays === 1825
+              ? "5 年全量"
+              : analysisDays === 180
+              ? "★ 推荐黄金平衡 (半年)"
+              : analysisDays === 90
+              ? "⚡ 短线高频波动"
+              : analysisDays === 365
+              ? "🛡️ 52周大箱体"
+              : `${analysisDays} 天`}
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
             { days: 90, label: "90 天", sub: "高频做T · 灵敏" },
             { days: 180, label: "180 天 (默认)", sub: "★ 黄金平衡 · 半年" },
             { days: 365, label: "365 天", sub: "年度大箱体 · 防守" },
+            { days: 1825, label: "1825 天", sub: "5 年全量" },
           ].map(({ days, label, sub }) => (
             <button
               key={days}

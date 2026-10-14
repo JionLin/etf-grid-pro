@@ -247,7 +247,7 @@ const GridParametersCard = ({
               {isCustomBenchmark ? `当前市场现价: ¥${current_price.toFixed(3)}` : getPriceDateText()}
             </div>
             <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
-              这是现在要挂的价，不是五年回测铺网价。回测铺网价见下方回测卡（窗口首日开盘，可与现价不同）。挂单步长来自近端 ATR（分析周期可能被夹成 180 天），五年战绩以回测卡为准。
+              这是现在要挂的价，不是五年回测铺网价。回测铺网价见下方回测卡（窗口首日开盘，可与现价不同）。挂单步长来自本次分析周期的近端 ATR，五年战绩以回测卡为准。
             </p>
           </div>
 

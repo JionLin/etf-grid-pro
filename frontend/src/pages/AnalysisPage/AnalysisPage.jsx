@@ -249,6 +249,9 @@ const AnalysisPage = () => {
   };
 
   const seoData = generateSEOData();
+  const serverAnalysisDays = analysisData?.input_parameters?.analysisDays
+    ?? analysisData?.input_parameters?.analysis_days;
+  const periodDays = serverAnalysisDays ?? currentParams?.analysisDays ?? 180;
 
   return (
     <>
@@ -318,7 +321,9 @@ const AnalysisPage = () => {
                     )}
                   </span>
                   <span>|</span>
-                  <span>周期：{currentParams?.analysisDays || 180}天</span>
+                  <span>
+                    周期：{periodDays}天{serverAnalysisDays ? "（服务端）" : ""}
+                  </span>
                   {currentParams?.benchmarkPrice && (
                     <>
                       <span>|</span>
