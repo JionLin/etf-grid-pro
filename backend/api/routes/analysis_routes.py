@@ -342,7 +342,7 @@ def run_backtest():
         from flask import current_app
         current_app.logger.error(f"策略回测失败: {str(e)}")
         current_app.logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': f"回测计算异常: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '回测计算异常'}), 500
 
 
 @analysis_bp.route('/api/backtest/records', methods=['GET'])
@@ -371,7 +371,10 @@ def get_backtest_records():
         )
         return jsonify({'success': True, 'data': records_data})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"获取回测档案列表失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"获取回测档案列表失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '获取回测档案列表失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/records/<run_id>', methods=['GET'])
@@ -383,7 +386,10 @@ def get_backtest_record_detail(run_id: str):
             return jsonify({'success': False, 'error': '未找到该回测档案'}), 404
         return jsonify({'success': True, 'data': record})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"读取回测明细失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"读取回测明细失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '读取回测明细失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/records/<run_id>', methods=['DELETE'])
@@ -395,7 +401,10 @@ def delete_backtest_record(run_id: str):
             return jsonify({'success': False, 'error': '回测记录不存在或已删除'}), 404
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"删除回测档案失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"删除回测档案失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '删除回测档案失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/distinct-etfs', methods=['GET'])
@@ -405,7 +414,10 @@ def get_distinct_etfs_in_records():
         etfs = backtest_repo.get_distinct_etfs()
         return jsonify({'success': True, 'data': etfs})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"获取标的列表失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"获取标的列表失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '获取标的列表失败'}), 500
 
 
 @analysis_bp.route('/api/grid-fit/board', methods=['GET'])
@@ -419,7 +431,10 @@ def get_grid_fit_board():
         )
         return jsonify({'success': True, 'data': payload})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"读取适合度榜失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"读取适合度榜失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '读取适合度榜失败'}), 500
 
 
 @analysis_bp.route('/api/grid-fit/progress', methods=['GET'])
@@ -436,7 +451,10 @@ def get_grid_fit_progress():
             },
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': f"读取适合度榜进度失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"读取适合度榜进度失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '读取适合度榜进度失败'}), 500
 
 
 @analysis_bp.route('/api/grid-fit/refresh', methods=['POST'])
@@ -464,7 +482,10 @@ def refresh_grid_fit():
         )
         return jsonify({'success': True, 'data': started})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"启动适合度榜补齐失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"启动适合度榜补齐失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '启动适合度榜补齐失败'}), 500
 
 
 @analysis_bp.route('/api/literature/eda-grid', methods=['GET'])
@@ -518,7 +539,7 @@ def get_eda_literature():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"读取文献失败: {str(e)}")
-        return jsonify({'success': False, 'error': f"读取文献失败: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '读取文献失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/matrix', methods=['GET'])
@@ -563,7 +584,7 @@ def get_universe_backtest_matrix():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"从 MySQL 获取回测矩阵失败: {str(e)}")
-        return jsonify({'success': False, 'error': f"从 MySQL 获取回测矩阵失败: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '从 MySQL 获取回测矩阵失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/sectors-ranking', methods=['GET'])
@@ -578,5 +599,5 @@ def get_sectors_ranking():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"从 MySQL 获取赛道横评失败: {str(e)}")
-        return jsonify({'success': False, 'error': f"从 MySQL 获取赛道横评失败: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '从 MySQL 获取赛道横评失败'}), 500
 

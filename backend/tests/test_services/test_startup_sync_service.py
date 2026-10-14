@@ -120,12 +120,14 @@ def test_two_phase_pipeline_error_handling():
 
         result = service.run_sync_pipeline(force=True)
         assert result["status"] == "failed"
-        assert "数据库网络超时" in result["error"]
+        assert result["error"] == "启动同步失败，请查看服务端日志"
+        assert "数据库网络超时" not in result["error"]
 
         status = service.get_status()
         assert status["is_syncing"] is False
         assert status["current_stage"] == "failed"
-        assert "数据库网络超时" in status["last_error"]
+        assert status["last_error"] == "启动同步失败，请查看服务端日志"
+        assert "数据库网络超时" not in status["last_error"]
 
 
 def test_sync_status_api_endpoint():

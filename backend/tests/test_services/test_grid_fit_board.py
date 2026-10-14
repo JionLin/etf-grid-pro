@@ -170,7 +170,8 @@ class TestGridFitBoard(unittest.TestCase):
         payload = self.service.list_board()
         self.assertEqual(payload["board"][0]["etf_code"], "515220")
         self.assertEqual(payload["failed"][0]["etf_code"], "511360")
-        self.assertIn("源站超时", payload["failed"][0]["atr"]["status_reason"])
+        self.assertEqual(payload["failed"][0]["atr"]["status_reason"], "行情同步失败")
+        self.assertNotIn("源站超时", payload["failed"][0]["atr"]["status_reason"])
         self.assertEqual(payload["progress"], {
             "ranked": 1,
             "short_sample": 1,

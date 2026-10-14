@@ -123,5 +123,5 @@ def get_etf_pool():
         current_app.logger.error(f"获取ETF做T标的池失败: {str(e)}")
         return jsonify({
             'success': False,
-            'error': f'获取标的池失败: {str(e)}'
+            'error': '获取标的池失败，请稍后重试'
         }), 500

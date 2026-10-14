@@ -232,7 +232,7 @@ class UniverseMatrixBacktestService:
                 logger.warning(f"标的 {clean_code} 周期 {key} 回测异常: {e}")
                 period_results[key] = {
                     "is_valid": False,
-                    "reason": f"回测计算异常: {str(e)[:30]}",
+                    "reason": "回测计算异常",
                     "annual_return": None,
                     "total_return": None,
                     "max_drawdown": None,

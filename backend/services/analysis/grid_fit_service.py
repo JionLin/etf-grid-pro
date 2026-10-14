@@ -196,7 +196,8 @@ class GridFitBoardService:
                 frame = sync_fn(code)
                 calendar_days, fingerprint = _coverage(frame)
             except Exception as exc:
-                self._mark_failed(code, name, sector, str(exc), None)
+                logger.exception("适合度榜行情同步失败 %s: %s", code, exc)
+                self._mark_failed(code, name, sector, "行情同步失败", None)
                 continue
             if calendar_days < SHORT_SAMPLE_FLOOR_DAYS:
                 self._mark_not_ready(code, name, sector, calendar_days, fingerprint)
@@ -209,6 +210,7 @@ class GridFitBoardService:
                     result = backtest_fn(code, step_mode)
                     self._store_result(code, name, sector, step_mode, result, fingerprint)
                 except Exception as exc:
+                    logger.exception("适合度榜回测失败 %s %s: %s", code, step_mode, exc)
                     self.repo.upsert_run({
                         "etf_code": code,
                         "etf_name": name,
@@ -217,7 +219,7 @@ class GridFitBoardService:
                         "protocol_version": PROTOCOL_VERSION,
                         "calendar_days": calendar_days,
                         "status": "failed",
-                        "status_reason": str(exc),
+                        "status_reason": "回测计算异常",
                         "cash_yield": None,
                         "source_fingerprint": fingerprint,
                     })
@@ -414,7 +416,7 @@ def start_background_batch(universe, sync_fn, backtest_fn, repo=None) -> Dict[st
             logger.exception("适合度榜补齐失败: %s", exc)
             with _state_lock:
                 _job_state["status"] = "idle"
-                _job_state["error"] = str(exc)
+                _job_state["error"] = "适合度榜补齐失败"
         finally:
             _job_lock.release()
 

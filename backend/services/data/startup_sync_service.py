@@ -225,8 +225,9 @@ class StartupSyncService:
 
         except Exception as e:
             logger.error("启动同步管道执行异常: %s", e, exc_info=True)
-            self._set_status(is_syncing=False, current_stage="failed", last_error=str(e))
-            return {"status": "failed", "error": str(e)}
+            public_error = "启动同步失败，请查看服务端日志"
+            self._set_status(is_syncing=False, current_stage="failed", last_error=public_error)
+            return {"status": "failed", "error": public_error}
         finally:
             if conn:
                 if has_lock:
