@@ -35,6 +35,16 @@ def test_short_history_is_marked_insufficient():
     assert metrics["elasticity"] == INSUFFICIENT_DATA_LABEL
 
 
+def test_pct_change_uses_previous_close_not_open():
+    records = AkShareClient.pct_change_versus_previous_close([
+        {"trade_date": "2026-09-11", "open": 1.32, "close": 1.292},
+        {"trade_date": "2026-09-10", "open": 1.30, "close": 1.319},
+    ])
+    by_date = {str(item["trade_date"]): item["pct_chg"] for item in records}
+    assert by_date["2026-09-10"] == 0.0
+    assert by_date["2026-09-11"] == -2.05
+
+
 def test_classify_does_not_invent_atr_from_name():
     classified = AkShareClient.classify_etf_item("芯片ETF", "512760")
     assert classified["sector"] == "科技芯片"

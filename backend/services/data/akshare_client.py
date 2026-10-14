@@ -917,10 +917,9 @@ class AkShareClient:
                     'low': l_price,
                     'vol': vol_val,
                     'amount': calc_amount,
-                    'pct_chg': round((c_price - o_price) / o_price * 100, 2) if o_price > 0 else 0.0
                 })
-            df = pd.DataFrame(records)
-            return df.sort_values('trade_date').reset_index(drop=True)
+            records = self.pct_change_versus_previous_close(records)
+            return pd.DataFrame(records).reset_index(drop=True)
         except Exception as e:
             logger.warning(f"备用K线获取失败: {str(e)}")
             return None
@@ -997,6 +996,20 @@ class AkShareClient:
             'elasticity': INSUFFICIENT_DATA_LABEL,
             'metrics_status': INSUFFICIENT_DATA_LABEL,
         }
+
+    @staticmethod
+    def pct_change_versus_previous_close(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """涨跌幅相对前一日收盘。首日没有前收，记 0，不用开盘价代替。"""
+        ordered = sorted(records, key=lambda item: str(item.get("trade_date")))
+        previous_close = None
+        for item in ordered:
+            close_price = float(item.get("close") or 0.0)
+            if previous_close is None or previous_close == 0:
+                item["pct_chg"] = 0.0
+            else:
+                item["pct_chg"] = round((close_price - previous_close) / previous_close * 100, 2)
+            previous_close = close_price
+        return ordered
 
     def _local_bar_metrics(self, etf_code: str) -> Dict[str, Any]:
         """读取本地日 K 并计算 ATR 与 20 日均额。读不到就标数据不足。"""
@@ -1242,10 +1255,10 @@ class AkShareClient:
                 'low': l_price,
                 'vol': vol_val,
                 'amount': calc_amount,
-                'pct_chg': round((c_price - o_price) / o_price * 100, 2) if o_price > 0 else 0.0
             })
 
-        df = pd.DataFrame(records).sort_values('trade_date').reset_index(drop=True)
+        records = self.pct_change_versus_previous_close(records)
+        df = pd.DataFrame(records).reset_index(drop=True)
         # 幂等全量落盘至本地 SQLite 时序库
         self.market_repo.save_bars(clean_code, df)
         logger.info(f"✓ {clean_code} 上市以来全生命周期共 {len(df)} 根 K 线成功同步并持久化到本地 SQLite！")
