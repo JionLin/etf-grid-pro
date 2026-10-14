@@ -534,6 +534,10 @@ class GridBacktestEngine:
             active_buy_slots.sort(key=lambda x: x.buy_price, reverse=True)
 
             for slot in active_buy_slots:
+                # 日 K 只有高低点，同一档当天先卖后买会把一根 K 线当成两笔确定成交。
+                if slot.sell_date == date_str:
+                    continue
+
                 shares_to_buy = slot.shares
                 buy_cost = round(shares_to_buy * slot.buy_price, 2)
                 fee = self.calculate_commission(buy_cost)

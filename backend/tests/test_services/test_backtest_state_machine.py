@@ -165,6 +165,45 @@ def test_win_rate_is_null_when_no_sells(mock_composite_grid):
     assert res["summary"]["win_rate"] is None
 
 
+def test_same_slot_cannot_sell_and_buy_on_one_bar():
+    """一根日 K 同时刺破卖价和买价时，同一档不能当天先卖后买。"""
+    engine = GridBacktestEngine()
+    grid = {
+        "rails": {
+            "small": {
+                "name": "小网 (高频做T)",
+                "tag": "小网",
+                "step_ratio": 0.05,
+                "buy_levels": [],
+                "sell_levels": [
+                    {"level_index": 1, "price": 1.05, "shares": 100},
+                ],
+            }
+        }
+    }
+    k_lines = [
+        {"date": "2026-06-01", "open": 1.00, "high": 1.10, "low": 0.90, "close": 1.00},
+        {"date": "2026-06-02", "open": 1.00, "high": 1.01, "low": 0.90, "close": 0.95},
+        {"date": "2026-06-03", "open": 0.95, "high": 0.96, "low": 0.94, "close": 0.95},
+        {"date": "2026-06-04", "open": 0.95, "high": 0.97, "low": 0.94, "close": 0.96},
+        {"date": "2026-06-05", "open": 0.96, "high": 0.98, "low": 0.95, "close": 0.97},
+    ]
+    res = engine.run_backtest(
+        pd.DataFrame(k_lines), total_capital=100000, composite_grid=grid, trade_mode="t0"
+    )
+    trades = res["total_trades_all"]
+    slot_id = "small_sell_slot_1"
+    by_day = {}
+    for trade in trades:
+        if trade["slot_id"] != slot_id:
+            continue
+        by_day.setdefault(trade["date"], set()).add(trade["action"])
+
+    assert "SELL" in by_day["2026-06-01"]
+    assert "BUY" not in by_day["2026-06-01"]
+    assert "BUY" in by_day["2026-06-02"]
+
+
 def test_t1_lock_protection(mock_composite_grid):
     """测试T+1保护规则：当日买入的同一槽位当日不可卖出"""
     engine = GridBacktestEngine()
