@@ -216,11 +216,22 @@ class ETFAnalysisService:
         return etf_code
 
     def _current_atr_ratio(self, df: pd.DataFrame) -> float:
-        """回测只需要当前 ATR 比率，不跑适宜度全文。"""
+        """窗口最后一根 K 线的 ATR。只给需要最新波动的调用方。"""
         processed = self.atr_analyzer.calculator.calculate_atr(df.copy())
         ratio = processed.iloc[-1].get("atr_ratio")
         if ratio is None or pd.isna(ratio):
             raise ValueError("无法从历史K线计算ATR比率")
+        return float(ratio)
+
+    def _anchor_atr_ratio(self, df: pd.DataFrame) -> float:
+        """锚点当日已经能算出的 ATR。不用窗口末日，避免步长看见未来波动。"""
+        processed = self.atr_analyzer.calculator.calculate_atr(df.copy())
+        ratio = processed.iloc[0].get("atr_ratio")
+        if ratio is None or pd.isna(ratio):
+            valid = processed["atr_ratio"].dropna()
+            if valid.empty:
+                raise ValueError("无法从历史K线计算ATR比率")
+            ratio = valid.iloc[0]
         return float(ratio)
     
     def get_historical_data(self, etf_code: str, days: int = 365) -> pd.DataFrame:
@@ -748,7 +759,7 @@ class ETFAnalysisService:
             current_price = float(df.iloc[-1]['close'])
             resolved_name = etf_name or self.resolve_etf_name(etf_code)
             if atr_ratio is None:
-                atr_ratio = self._current_atr_ratio(df)
+                atr_ratio = self._anchor_atr_ratio(df)
 
             # 以当年真实基准价格 backtest_base_price 展开回测网格阶梯
             composite_steps = self.grid_optimizer.calculate_composite_steps(
