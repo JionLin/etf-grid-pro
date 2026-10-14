@@ -3,10 +3,12 @@ import pandas as pd
 from backend.repositories.market_data_repository import MarketDataRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestMarketDataRepository(unittest.TestCase):
     def setUp(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         self.repo = MarketDataRepository(database=TEST_DATABASE)
 

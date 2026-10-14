@@ -5,10 +5,12 @@
 
 import pytest
 from backend.services.analysis.etf_analysis_service import ETFAnalysisService
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 @pytest.fixture
 def analysis_service():
+    skip_without_mysql()
     return ETFAnalysisService()
 
 

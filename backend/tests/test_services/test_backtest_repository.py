@@ -2,12 +2,14 @@ import unittest
 from backend.repositories.backtest_repository import BacktestRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestBacktestRepository(unittest.TestCase):
     """验证回测档案的存储、列表筛选、详情还原与删除功能"""
 
     def setUp(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         self.repo = BacktestRepository(database=TEST_DATABASE)
 

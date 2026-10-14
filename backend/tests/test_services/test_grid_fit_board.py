@@ -1,12 +1,12 @@
 import inspect
 import unittest
 
-from backend.api.routes.analysis_routes import refresh_grid_fit
 from backend.repositories.backtest_repository import BacktestRepository
 from backend.repositories.etf_pool_repository import ETFPoolRepository
 from backend.repositories.grid_fit_repository import GridFitRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 from backend.services.analysis.grid_fit_service import (
     PROTOCOL_VERSION,
     GridFitBoardService,
@@ -31,6 +31,7 @@ def _result(profit, calendar_days, sells, drawdown, annual_return):
 
 class TestGridFitBoard(unittest.TestCase):
     def setUp(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         self.repo = GridFitRepository(database=TEST_DATABASE)
         self.archive = BacktestRepository(database=TEST_DATABASE)
@@ -138,6 +139,7 @@ class TestGridFitBoard(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual(len(self.repo.list_runs(PROTOCOL_VERSION)), 2)
         self.assertTrue(protocol_runner_avoids_archive())
+        from backend.api.routes.analysis_routes import refresh_grid_fit
         self.assertNotIn("save_run", inspect.getsource(refresh_grid_fit))
         callback_source = inspect.getsource(build_protocol_callbacks)
         self.assertIn("sync_window_history", callback_source)

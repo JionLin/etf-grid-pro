@@ -2,6 +2,7 @@ import pytest
 from backend.repositories.etf_pool_repository import ETFPoolRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestETFPoolRepository:
@@ -9,6 +10,7 @@ class TestETFPoolRepository:
 
     @pytest.fixture
     def temp_repo(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         yield ETFPoolRepository(database=TEST_DATABASE)
 

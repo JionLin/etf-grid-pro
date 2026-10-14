@@ -20,10 +20,12 @@ from backend.services.analysis.grid_fit_service import GridFitBoardService, PROT
 from backend.services.analysis.subsector_seed import run_subsector_seed
 from backend.services.data.akshare_client import AkShareClient
 from backend.services.data.sqlite_mysql_importer import import_existing_sqlite
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestMysqlStoreAndSeed(unittest.TestCase):
     def setUp(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
 
     def test_wrong_password_does_not_create_sqlite(self):

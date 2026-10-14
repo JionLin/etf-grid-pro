@@ -5,10 +5,12 @@ from backend.services.data.akshare_client import AkShareClient
 from backend.repositories.market_data_repository import MarketDataRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestAKShareClientFallbackPagination(unittest.TestCase):
     def setUp(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         self.client = AkShareClient()
         self.client.market_repo = MarketDataRepository(database=TEST_DATABASE)
