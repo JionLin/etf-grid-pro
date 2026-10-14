@@ -563,7 +563,8 @@ class ETFAnalysisService:
             # 1. 先行计算大中小三层复合网格阶梯 (以 anchor_price 为中心铺设，尊重 step_mode 与自定义比例)
             composite_steps = self.grid_optimizer.calculate_composite_steps(
                 anchor_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
-                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers
+                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers,
+                risk_preference=risk_preference,
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, anchor_price, composite_steps, base_position_ratio=0.5,
@@ -709,6 +710,7 @@ class ETFAnalysisService:
         atr_multipliers: Optional[Dict[str, float]] = None,
         atr_ratio: Optional[float] = None,
         etf_name: Optional[str] = None,
+        risk_preference: str = '均衡',
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -764,7 +766,8 @@ class ETFAnalysisService:
             # 以当年真实基准价格 backtest_base_price 展开回测网格阶梯
             composite_steps = self.grid_optimizer.calculate_composite_steps(
                 backtest_base_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
-                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers
+                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers,
+                risk_preference=risk_preference,
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, backtest_base_price, composite_steps, base_position_ratio=0.5,

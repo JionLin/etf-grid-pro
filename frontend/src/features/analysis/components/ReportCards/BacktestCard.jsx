@@ -86,6 +86,7 @@ const BacktestCard = ({
   edaStepRatios = null,
   edaSteps = null,
   atrMultipliers = null,
+  riskPreference = "均衡",
   onHistoryMeta,
 }) => {
   const safeTotalCapital = Number(totalCapital || 30000);
@@ -124,6 +125,7 @@ const BacktestCard = ({
         edaStepRatios,
         edaSteps,
         atrMultipliers,
+        riskPreference,
         customBasePrice: activeCustomPrice,
       }, { signal });
       if (signal?.aborted) return;
@@ -147,7 +149,7 @@ const BacktestCard = ({
     const controller = new AbortController();
     fetchBacktest(backtestDays, null, controller.signal);
     return () => controller.abort();
-  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, atrMultipliers, anchorMode]);
+  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, atrMultipliers, riskPreference, anchorMode]);
 
   const summary = backtestData?.summary;
   const profitPool = backtestData?.profit_pool || summary?.profit_pool;

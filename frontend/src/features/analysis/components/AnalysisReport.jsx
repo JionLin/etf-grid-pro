@@ -29,6 +29,7 @@ function buildBacktestProps(backtestParams, derived) {
     edaStepRatios: source.edaStepRatios || source.eda_step_ratios || null,
     edaSteps: source.edaSteps || null,
     atrMultipliers: source.atrMultipliers || source.atr_multipliers || null,
+    riskPreference: source.riskPreference || source.risk_preference || "均衡",
   };
 }
 
@@ -108,6 +109,7 @@ const AnalysisReport = ({
     edaStepRatios: inputParameters?.eda_step_ratios || inputParameters?.edaStepRatios || null,
     edaSteps: inputParameters?.edaSteps || null,
     atrMultipliers: inputParameters?.atr_multipliers || inputParameters?.atrMultipliers || null,
+    riskPreference: inputParameters?.risk_preference || inputParameters?.riskPreference || "均衡",
   };
   const backtestProps = buildBacktestProps(backtestParams, derivedBacktest);
   const showBacktest = loading || BACKTEST_TABS.has(activeTab);

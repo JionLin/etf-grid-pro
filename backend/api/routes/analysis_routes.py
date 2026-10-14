@@ -221,6 +221,9 @@ def run_backtest():
         backtest_days = max(30, min(1825, backtest_days))
         adjustment_coefficient = float(data.get('adjustmentCoefficient', 1.0))
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
+        risk_preference = str(data.get('riskPreference', data.get('risk_preference', '均衡')))
+        if risk_preference not in ['低频', '均衡', '高频']:
+            risk_preference = '均衡'
         reinvest_mode = str(data.get('reinvestMode', data.get('reinvest_mode', 'cash')))
         step_mode = str(data.get('stepMode', data.get('step_mode', 'atr')))
         if step_mode not in ['atr', 'fixed_eda']:
@@ -309,6 +312,7 @@ def run_backtest():
             eda_step_ratios=eda_step_ratios,
             custom_base_price=custom_base_price,
             atr_multipliers=atr_multipliers,
+            risk_preference=risk_preference,
         )
 
         # 自动归档至本地 SQLite 回测档案库
