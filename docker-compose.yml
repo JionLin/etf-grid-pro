@@ -13,6 +13,11 @@ services:
       - HOST=0.0.0.0
       - PORT=5001
       - TUSHARE_TOKEN=${TUSHARE_TOKEN}
+      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-etf_grid}
     env_file:
       - .env
     volumes:
