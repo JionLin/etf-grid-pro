@@ -646,6 +646,12 @@ const GridParametersCard = ({
               </div>
             )}
 
+            {gridStrategy.composite_grid?.funding_gap?.has_gap && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {gridStrategy.composite_grid.funding_gap.message}
+              </div>
+            )}
+
             {/* 分轨快速筛选标签 */}
             {gridStrategy.composite_grid?.merged_ladder && (
               <div className="flex flex-wrap items-center gap-1.5 mb-3">

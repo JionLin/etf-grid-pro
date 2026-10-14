@@ -27,6 +27,56 @@ class CompositeGridCalculator:
         """计算单笔交易佣金 (支持单笔最低保底收费门槛)"""
         return max(self.min_commission, round(amount * self.commission_rate, 2))
 
+    @staticmethod
+    def _lot_shares(allocated_fund: float, price: float) -> int:
+        """按 100 股一手向下取整。不够一手时返回 0，由调用方跳过该档。"""
+        if price <= 0 or allocated_fund <= 0:
+            return 0
+        return int(allocated_fund / price / 100) * 100
+
+    @staticmethod
+    def _funding_gap_level(
+        rail_key: str,
+        rail_name: str,
+        action: str,
+        level_index: int,
+        allocated_fund: float,
+        price: float,
+    ) -> Dict[str, Any]:
+        """记录被跳过的档位，避免把 0 股抬成 100 股。"""
+        return {
+            "rail": rail_key,
+            "rail_name": rail_name,
+            "action": action,
+            "level_index": level_index,
+            "allocated_fund": round(allocated_fund, 2),
+            "lot_cost": round(price * 100, 2),
+            "reason": "不足一手",
+        }
+
+    @staticmethod
+    def _build_funding_gap(skipped_levels: List[Dict[str, Any]], current_price: float) -> Dict[str, Any]:
+        """汇总资金缺口。没有跳过的档位时 has_gap 为 False。"""
+        skipped_count = len(skipped_levels)
+        if skipped_count == 0:
+            return {
+                "has_gap": False,
+                "skipped_count": 0,
+                "skipped_levels": [],
+                "lot_cost": round(current_price * 100, 2),
+                "message": "",
+            }
+        return {
+            "has_gap": True,
+            "skipped_count": skipped_count,
+            "skipped_levels": skipped_levels,
+            "lot_cost": round(current_price * 100, 2),
+            "message": (
+                f"有 {skipped_count} 档分到的资金不够 100 股，已跳过。"
+                "继续挂出会卖出超过底仓，或买入超过可用现金。"
+            ),
+        }
+
     def calculate_composite_grid(
         self,
         total_capital: float,
@@ -66,6 +116,7 @@ class CompositeGridCalculator:
             # 2. 为各轨道分别生成买卖档位
             rails_result = {}
             all_ladder_items = []
+            skipped_levels: List[Dict[str, Any]] = []
 
             for rail_key in ["small", "medium", "large"]:
                 conf = composite_steps.get(rail_key, {})
@@ -87,10 +138,12 @@ class CompositeGridCalculator:
                 # 生成卖出档位 (1 至 levels_count 档)
                 for lvl in range(levels_count, 0, -1):
                     sell_price = round(current_price * (1 + step_ratio * lvl), 3)
-                    # 股数向下整百对齐
-                    sell_shares = int(fund_per_level / current_price / 100) * 100
-                    if sell_shares == 0:
-                        sell_shares = 100
+                    sell_shares = self._lot_shares(fund_per_level, current_price)
+                    if sell_shares <= 0:
+                        skipped_levels.append(self._funding_gap_level(
+                            rail_key, rail_name, "SELL", lvl, fund_per_level, current_price
+                        ))
+                        continue
                     amount = round(sell_shares * sell_price, 2)
                     buy_cost = round(sell_shares * current_price, 2)
                     # 卖单做T利润 = 卖出金额 - 基准买入成本 - 买卖双边佣金
@@ -125,9 +178,12 @@ class CompositeGridCalculator:
                     buy_price = round(current_price * (1 - step_ratio * lvl), 3)
                     lvl_weight = buy_weights[lvl - 1]
                     allocated_fund = rail_fund * (lvl_weight / sum_weights)
-                    buy_shares = int(allocated_fund / buy_price / 100) * 100
-                    if buy_shares == 0:
-                        buy_shares = 100
+                    buy_shares = self._lot_shares(allocated_fund, buy_price)
+                    if buy_shares <= 0:
+                        skipped_levels.append(self._funding_gap_level(
+                            rail_key, rail_name, "BUY", lvl, allocated_fund, buy_price
+                        ))
+                        continue
                     amount = round(buy_shares * buy_price, 2)
                     sell_revenue = round(buy_shares * (buy_price + current_price * step_ratio), 2)
                     # 买单做T利润 = 预估未来卖出金额 - 买入金额 - 买卖双边佣金
@@ -173,12 +229,14 @@ class CompositeGridCalculator:
             # 3. 多轨合并阶梯排序 (按价格从高到低倒序)
             merged_ladder = sorted(all_ladder_items, key=lambda x: x["price"], reverse=True)
 
+            funding_gap = self._build_funding_gap(skipped_levels, current_price)
             return {
                 "base_position": base_position_info,
                 "liquid_capital": round(liquid_capital, 2),
                 "rails": rails_result,
                 "merged_ladder": merged_ladder,
                 "total_levels": len(merged_ladder),
+                "funding_gap": funding_gap,
             }
 
         except Exception as e:
