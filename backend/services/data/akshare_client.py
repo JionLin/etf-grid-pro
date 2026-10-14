@@ -794,7 +794,7 @@ class AkShareClient:
             import requests
             code = etf_code.split('.')[0]
             prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
-            resp = requests.get(f'http://qt.gtimg.cn/q={prefix}{code}', timeout=5)
+            resp = requests.get(f'https://qt.gtimg.cn/q={prefix}{code}', timeout=5)
             resp.encoding = 'gbk'
             if '~' not in resp.text:
                 return None
@@ -1210,9 +1210,9 @@ class AkShareClient:
         # 最多向前拉取 25 次（约 16,000 个交易日，足以覆盖 60 年）
         for _ in range(25):
             if not latest_date:
-                url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,,640,qfq"
+                url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,,640,qfq"
             else:
-                url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,{latest_date},640,qfq"
+                url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,{latest_date},640,qfq"
 
             try:
                 import requests
