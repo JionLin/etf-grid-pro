@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
+from .trading_calendar import load_trading_year
 from .market_clock import (
     SHANGHAI,
     as_shanghai,
@@ -725,31 +726,20 @@ class AkShareClient:
             List[str]: 交易日列表
         """
         try:
-            # 先检查缓存
-            cached_calendar = self.cache.get_permanent_cache("trading_cal", str(year))
-            if cached_calendar:
-                return cached_calendar
-            
-            # 调用AkShare交易日历接口
-            df = ak.tool_trade_date_hist_sina()
-            
-            if df.empty:
-                logger.warning(f"✗ AkShare交易日历接口返回空数据")
-                return []
-            
-            # 处理日期格式
-            df['trade_date'] = df['trade_date'].astype(str).str.replace('-', '')
-            
-            # 筛选年份
-            year_filter = df['trade_date'].str.startswith(str(year))
-            year_data = df[year_filter]['trade_date'].tolist()
-            
-            # 缓存结果
-            self.cache.set_permanent_cache("trading_cal", str(year), year_data)
-            
-            logger.info(f"✓ 从AkShare获取{year}年交易日历成功，共{len(year_data)}个交易日")
+            def fetch_year(target_year: int) -> List[str]:
+                df = ak.tool_trade_date_hist_sina()
+                if df.empty:
+                    logger.warning("✗ AkShare交易日历接口返回空数据")
+                    return []
+                df["trade_date"] = df["trade_date"].astype(str).str.replace("-", "")
+                year_filter = df["trade_date"].str.startswith(str(target_year))
+                return df[year_filter]["trade_date"].tolist()
+
+            year_data = load_trading_year(self.cache, year, fetch_year)
+            if year_data:
+                logger.info(f"✓ 从AkShare获取{year}年交易日历成功，共{len(year_data)}个交易日")
             return year_data
-            
+
         except Exception as e:
             logger.error(f"✗ 从AkShare获取{year}年交易日历失败: {str(e)}")
             return []
