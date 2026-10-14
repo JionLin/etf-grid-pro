@@ -530,10 +530,16 @@ class ETFPoolRepository:
     def refresh_real_atr_from_bars(self) -> int:
         """基于 etf_daily_bar 中的真实历史 K 线，为 etf_instrument 中的标的重新计算 14 日 Wilder ATR 与弹性等级。"""
         import pandas as pd
-        from algorithms.atr.calculator import ATRCalculator
+        try:
+            from services.data.bar_metrics import FAKE_LIST_DATE, INSUFFICIENT_DATA_LABEL, measure_local_metrics
+        except ImportError:
+            from backend.services.data.bar_metrics import (
+                FAKE_LIST_DATE,
+                INSUFFICIENT_DATA_LABEL,
+                measure_local_metrics,
+            )
 
         conn = self._connect()
-        calc = ATRCalculator(period=14)
         updated_count = 0
         try:
             with conn.cursor() as cursor:
@@ -562,26 +568,28 @@ class ETFPoolRepository:
                 df = pd.DataFrame(rows)
                 updates = []
                 for code, group in df.groupby("etf_code"):
-                    if len(group) >= 14:
-                        try:
-                            res = calc.calculate_atr(group.copy())
-                            latest = res.iloc[-1]
-                            real_atr = round(float(latest["atr_pct"]), 2)
-                            if real_atr >= 3.0:
-                                elasticity = "高弹性"
-                            elif real_atr >= 2.0:
-                                elasticity = "稳健型"
-                            else:
-                                elasticity = "低波防守"
-                            updates.append((real_atr, elasticity, code))
-                        except Exception as calc_err:
-                            logger.debug("标的 %s 计算真实 ATR 失败: %s", code, calc_err)
+                    try:
+                        metrics = measure_local_metrics(group)
+                    except Exception as calc_err:
+                        logger.debug("标的 %s 计算真实 ATR 失败: %s", code, calc_err)
+                        continue
+                    if metrics["atr_sufficient"]:
+                        atr_pct = metrics["atr_pct"]
+                        elasticity = metrics["elasticity"]
+                    else:
+                        atr_pct = 0.0
+                        elasticity = INSUFFICIENT_DATA_LABEL
+                    ma20 = metrics["amount_ma20_10k"] if metrics["turnover_sufficient"] else 0.0
+                    updates.append((atr_pct, elasticity, ma20, FAKE_LIST_DATE, INSUFFICIENT_DATA_LABEL, code))
 
                 if updates:
                     cursor.executemany(
                         """
                         UPDATE etf_instrument
-                        SET atr_pct = %s, elasticity = %s
+                        SET atr_pct = %s, elasticity = %s, amount_ma20_10k = %s,
+                            list_date = CASE
+                                WHEN list_date IS NULL OR list_date = '' OR list_date = %s
+                                THEN %s ELSE list_date END
                         WHERE etf_code = %s
                         """,
                         updates,

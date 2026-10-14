@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
+from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
 from .cache_service import EnhancedCache
 try:
     from repositories.market_data_repository import MarketDataRepository
@@ -945,63 +946,68 @@ class AkShareClient:
         ])
 
         if any(k in name for k in ['债', '短融', '存单']):
-            sector, base_atr = '债券与固收', 0.4
+            sector = '债券与固收'
         elif any(k in name for k in ['黄金', '豆粕', '能源化工', '白银', '有色期货', '金ETF', '上海金']):
-            sector, base_atr = '大宗商品', 1.6
+            sector = '大宗商品'
         elif any(k in name for k in [
             '恒生', '港股', '纳斯达克', '纳指', '标普', '日经', '德国', '法国',
             '中概', '亚太', '道琼斯', '巴西', '日本东证',
         ]):
-            sector, base_atr = '跨境全球', 2.8
+            sector = '跨境全球'
         elif any(k in name for k in [
             '半导体', '芯片', '电子', '计算机', '软件', '通信', '人工智能', 'AI',
             '信创', '大数据', '传媒', '游戏', '物联网', '机器人', '卫星', '云计算',
             '集成电路', '科技ETF', '5G', '影视',
         ]):
-            sector, base_atr = '科技芯片', 3.4
+            sector = '科技芯片'
         elif any(k in name for k in [
             '光伏', '新能源', '电池', '锂电', '风电', '储能', '汽车', '智能网联',
             '机械', '装备', '工业母机', '机床', '电网设备', '船舶',
         ]):
-            sector, base_atr = '新能源制造', 2.7
+            sector = '新能源制造'
         elif any(k in name for k in ['医药', '医疗', '创新药', '中药', '生物', '疫苗']):
-            sector, base_atr = '医药健康', 2.2
+            sector = '医药健康'
         elif any(k in name for k in ['证券', '券商', '银行', '保险', '地产', '金融科技', '金融ETF']):
-            sector, base_atr = '大金融', 2.1
+            sector = '大金融'
         elif any(k in name for k in ['消费', '白酒', '酒', '食品', '饮料', '家电', '农业', '养殖', '畜牧', '旅游', '粮食']):
-            sector, base_atr = '大消费', 2.0
+            sector = '大消费'
         elif any(k in name for k in [
             '煤炭', '钢铁', '有色', '化工', '稀土', '金属', '油气', '能源', '资源',
             '石油', '石化', '矿业', '建材',
         ]):
-            sector, base_atr = '周期资源', 2.4
+            sector = '周期资源'
         elif any(k in name for k in ['电力', '绿电', '公用', '基建', '水务', '红利', '高股息', '低波']):
-            sector, base_atr = '公用红利', 1.5
+            sector = '公用红利'
         elif any(k in name for k in ['军工', '航天', '国防', '航空']):
-            sector, base_atr = '国防军工', 2.6
+            sector = '国防军工'
         elif any(k in name for k in [
             '300', '500', '1000', '2000', '50', '创业板', '科创50', '科创100',
             'A50', 'A500', '中证A', '综指', '上证', '深证', '中证800',
             '科创200', '科创创业', '价值', '成长', '现金流',
         ]):
-            sector, base_atr = '核心宽基', 1.9
+            sector = '核心宽基'
         else:
-            sector, base_atr = UNCLASSIFIED_SECTOR, 2.0
-
-        if base_atr >= 3.0:
-            elasticity = '高弹性'
-        elif base_atr >= 2.0:
-            elasticity = '稳健型'
-        else:
-            elasticity = '低波防守'
+            sector = UNCLASSIFIED_SECTOR
 
         return {
             'excluded': False,
             'sector': sector,
             'is_t0': is_t0,
-            'atr_pct': base_atr,
-            'elasticity': elasticity,
+            'atr_pct': None,
+            'elasticity': INSUFFICIENT_DATA_LABEL,
+            'metrics_status': INSUFFICIENT_DATA_LABEL,
         }
+
+    def _local_bar_metrics(self, etf_code: str) -> Dict[str, Any]:
+        """读取本地日 K 并计算 ATR 与 20 日均额。读不到就标数据不足。"""
+        frame = None
+        market_repo = getattr(self, "market_repo", None)
+        if market_repo is not None and hasattr(market_repo, "get_bars"):
+            try:
+                frame = market_repo.get_bars(etf_code, limit=60)
+            except Exception as exc:
+                logger.debug("读取本地日 K 失败 %s: %s", etf_code, exc)
+        return measure_local_metrics(frame)
 
     @staticmethod
     def extract_spot_quote(row: Dict[str, Any]) -> Optional[tuple]:
@@ -1107,15 +1113,15 @@ class AkShareClient:
             for row in df_spot.to_dict(orient='records'):
                 raw_amt = float(row.get('成交额') or 0.0)
                 amt_10k = raw_amt / 10000.0
-                # 计算近 20 个交易日均成交额 (万元)
-                ma20_amt_10k = round(amt_10k * 0.95, 2)
-
-                # 1. 第一重护城河：稳态流动性近 20 日均成交额 >= 3000 万元
-                if ma20_amt_10k < min_ma20_amount_10k or amt_10k < min_amount_10k:
-                    continue
-
                 raw_code = str(row.get('代码', ''))
                 clean_code = raw_code.replace('sh', '').replace('sz', '')
+                metrics = self._local_bar_metrics(clean_code)
+                ma20_amt_10k = metrics["amount_ma20_10k"] if metrics["turnover_sufficient"] else None
+
+                # 1. 第一重护城河：近 20 日均成交额必须来自本地日 K，不够不放行
+                if ma20_amt_10k is None or ma20_amt_10k < min_ma20_amount_10k or amt_10k < min_amount_10k:
+                    continue
+
                 name = str(row.get('名称', ''))
 
                 # 2. 第二重护城河：排除未满 3 年次新标的
@@ -1126,8 +1132,8 @@ class AkShareClient:
                 if classification.get('excluded'):
                     continue
 
-                # 3. 第三重护城河：波动率盈利空间 ATR >= 1.5%（排除死水纯债与短融类）
-                if classification['atr_pct'] < min_atr_pct:
+                # 3. 第三重护城河：14 日 ATR 来自本地日 K。样本不够不借用名称波幅。
+                if not metrics["atr_sufficient"] or metrics["atr_pct"] < min_atr_pct:
                     continue
 
                 p_val = float(row.get('最新价') or 0.0)
@@ -1137,14 +1143,15 @@ class AkShareClient:
                     'name': name,
                     'sector': classification['sector'],
                     'is_t0': classification['is_t0'],
-                    'list_date': '2023前成熟上市',
+                    'list_date': INSUFFICIENT_DATA_LABEL,
                     'latest_price': p_val,
                     'pct_change': pct_val,
                     'amount_10k': round(amt_10k, 2),
                     'amount_ma20_10k': ma20_amt_10k,
-                    'atr_pct': classification['atr_pct'],
-                    'elasticity': classification['elasticity'],
-                    'score': round(min(98.0, 70.0 + (ma20_amt_10k / 5000.0) * 5 + classification['atr_pct'] * 4), 1)
+                    'atr_pct': metrics['atr_pct'],
+                    'elasticity': metrics['elasticity'],
+                    'metrics_status': 'local_bars',
+                    'score': round(min(98.0, 70.0 + (ma20_amt_10k / 5000.0) * 5 + metrics['atr_pct'] * 4), 1)
                 })
 
             # 4. 持久化落盘本地 SQLite 与 JSON 镜像
