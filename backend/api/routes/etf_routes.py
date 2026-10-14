@@ -70,9 +70,7 @@ def get_capital_presets():
             {'value': 300000, 'label': '30万', 'popular': False},
             {'value': 500000, 'label': '50万', 'popular': True},
             {'value': 800000, 'label': '80万', 'popular': False},
-            {'value': 1000000, 'label': '100万', 'popular': True},
-            {'value': 1500000, 'label': '150万', 'popular': False},
-            {'value': 2000000, 'label': '200万', 'popular': False}
+            {'value': 1000000, 'label': '100万', 'popular': True}
         ]
         
         return jsonify({
