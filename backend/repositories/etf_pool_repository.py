@@ -104,6 +104,42 @@ class ETFPoolRepository:
         finally:
             conn.close()
 
+    def update_quotes(self, quotes: List[tuple]) -> int:
+        """按代码更新最新价和涨跌幅。
+
+        Args:
+            quotes: (etf_code, latest_price, pct_change)
+
+        Returns:
+            int: 更新语句影响的行数
+        """
+        if not quotes:
+            return 0
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        payload = [
+            (float(price), float(pct), now_str, str(code))
+            for code, price, pct in quotes
+        ]
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    UPDATE etf_instrument
+                    SET latest_price = %s, pct_change = %s, updated_at = %s
+                    WHERE etf_code = %s
+                    """,
+                    payload,
+                )
+                updated = cursor.rowcount
+            conn.commit()
+            return updated
+        except Exception as exc:
+            logger.error("更新标的池行情失败: %s", exc)
+            raise
+        finally:
+            conn.close()
+
     def _instrument_tuple(self, record: Dict[str, Any], now_str: str) -> tuple:
         sector = record["sector"]
         subsector = record.get("subsector")

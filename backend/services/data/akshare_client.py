@@ -979,6 +979,76 @@ class AkShareClient:
             'elasticity': elasticity,
         }
 
+    @staticmethod
+    def extract_spot_quote(row: Dict[str, Any]) -> Optional[tuple]:
+        """从行情行取出代码、最新价、涨跌幅。缺最新价时不用昨收顶替。"""
+        raw_code = str(row.get("代码") or row.get("code") or "")
+        code = raw_code.replace("sh", "").replace("sz", "").strip()
+        if len(code) != 6 or not code.isdigit():
+            return None
+        if row.get("最新价") not in (None, ""):
+            price = row.get("最新价")
+        elif row.get("trade") not in (None, ""):
+            price = row.get("trade")
+        else:
+            return None
+        if row.get("涨跌幅") not in (None, ""):
+            pct = row.get("涨跌幅")
+        elif row.get("changepercent") not in (None, ""):
+            pct = row.get("changepercent")
+        else:
+            pct = 0.0
+        try:
+            price_value = float(price)
+            pct_value = float(pct)
+        except (TypeError, ValueError):
+            return None
+        if price_value != price_value or pct_value != pct_value:
+            return None
+        return code, price_value, pct_value
+
+    def _load_category_spot_rows(self) -> List[Dict[str, Any]]:
+        """新浪 ETF 分类行情。列名由数据源给出，调用方按最新价读取。"""
+        frame = ak.fund_etf_category_sina(symbol="ETF基金")
+        return frame.to_dict(orient="records")
+
+    def _overlay_live_quotes(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """用实时最新价覆盖已落库标的。行情失败时保留原快照。"""
+        try:
+            rows = self._load_category_spot_rows()
+        except Exception as exc:
+            logger.warning("刷新标的池行情失败，继续使用已落库价格: %s", exc)
+            return records
+        quotes: Dict[str, tuple] = {}
+        for row in rows:
+            parsed = self.extract_spot_quote(row)
+            if parsed is None:
+                continue
+            code, price, pct = parsed
+            quotes[code] = (price, pct)
+        if not quotes:
+            return records
+        updates = []
+        refreshed: List[Dict[str, Any]] = []
+        for record in records:
+            code = str(record.get("etf_code") or "")
+            quote = quotes.get(code)
+            if quote is None:
+                refreshed.append(record)
+                continue
+            price, pct = quote
+            updated = dict(record)
+            updated["latest_price"] = price
+            updated["pct_change"] = pct
+            refreshed.append(updated)
+            updates.append((code, price, pct))
+        if updates:
+            try:
+                self.pool_repo.update_quotes(updates)
+            except Exception as exc:
+                logger.warning("落库最新行情失败: %s", exc)
+        return refreshed
+
     def build_or_get_etf_pool(
         self,
         min_amount_10k: float = 0.0,
@@ -997,8 +1067,9 @@ class AkShareClient:
                 limit=500
             )
             if existing and len(existing) >= 20:
-                logger.info(f"✓ 从本地 SQLite 极速直出做 T 标的池，共 {len(existing)} 只标的")
-                return existing
+                refreshed = self._overlay_live_quotes(existing)
+                logger.info(f"✓ 从本地标的池直出 {len(refreshed)} 只，并覆盖实时最新价")
+                return refreshed
 
         logger.info("→ 触发全市场做 T 标的池全量构建与三重护城河清洗...")
         try:
