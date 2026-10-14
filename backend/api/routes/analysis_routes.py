@@ -14,6 +14,7 @@ from services.analysis.grid_fit_service import (
 from repositories.backtest_repository import BacktestRepository
 from repositories.etf_pool_repository import ETFPoolRepository
 from services.analysis.analysis_days import resolve_analysis_days
+from services.analysis.literature_paths import resolve_eda_literature
 
 # 创建分析蓝图
 analysis_bp = Blueprint('analysis', __name__)
@@ -492,17 +493,7 @@ def refresh_grid_fit():
 def get_eda_literature():
     """获取 E大网格实战三篇经典文献"""
     try:
-        import os
-        possible_paths = [
-            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'E大', '网格3篇.md'),
-            os.path.join(os.getcwd(), 'E大', '网格3篇.md'),
-            '/Users/johnny/Desktop/github/etf-grid-design/E大/网格3篇.md',
-        ]
-        file_path = None
-        for p in possible_paths:
-            if os.path.exists(p):
-                file_path = p
-                break
+        file_path = resolve_eda_literature(route_file=__file__)
 
         if not file_path:
             return jsonify({'success': False, 'error': '未找到文献文件'}), 404
