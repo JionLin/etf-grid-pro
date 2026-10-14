@@ -3,6 +3,7 @@ import pandas as pd
 
 from backend.services.data.akshare_client import AkShareClient
 from backend.services.data.bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
+from backend.services.data.t0_rules import is_t0_instrument
 
 
 def _bars(count: int, amount: float = 50_000_000.0) -> pd.DataFrame:
@@ -43,6 +44,14 @@ def test_pct_change_uses_previous_close_not_open():
     by_date = {str(item["trade_date"]): item["pct_chg"] for item in records}
     assert by_date["2026-09-10"] == 0.0
     assert by_date["2026-09-11"] == -2.05
+
+
+def test_t0_rule_is_shared_by_code_and_name():
+    assert is_t0_instrument("159941", "") is True
+    assert is_t0_instrument("518880", "黄金ETF") is True
+    assert is_t0_instrument("515220", "煤炭ETF国泰") is False
+    assert AkShareClient.classify_etf_item("黄金ETF", "518880")["is_t0"] is True
+    assert AkShareClient.classify_etf_item("煤炭ETF国泰", "515220")["is_t0"] is False
 
 
 def test_classify_does_not_invent_atr_from_name():

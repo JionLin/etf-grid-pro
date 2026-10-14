@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
+from .t0_rules import is_t0_instrument
 from .cache_service import EnhancedCache
 try:
     from repositories.market_data_repository import MarketDataRepository
@@ -938,11 +939,7 @@ class AkShareClient:
                 'elasticity': None,
             }
 
-        is_t0 = any(k in name for k in [
-            '债', '短融', '存单', '黄金', '豆粕', '能源化工', '白银', '有色期货',
-            '金ETF', '上海金', '恒生', '港股', '纳斯达克', '纳指', '标普', '日经',
-            '德国', '法国', '美股', '海外', '中概', '亚太', '道琼斯', '巴西', '日本东证',
-        ])
+        is_t0 = is_t0_instrument(code, name)
 
         if any(k in name for k in ['债', '短融', '存单']):
             sector = '债券与固收'

@@ -116,7 +116,7 @@ class UniverseMatrixBacktestService:
             df["date"] = df["trade_date"]
         total_bars = len(df)
 
-        trade_mode = "t0" if ETFConstants.is_t0_etf(clean_code) else "t1"
+        trade_mode = "t0" if ETFConstants.is_t0_etf(clean_code, etf_name) else "t1"
         period_results: Dict[str, Any] = {}
 
         now = datetime.now()

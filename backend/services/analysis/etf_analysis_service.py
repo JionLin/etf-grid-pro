@@ -775,7 +775,7 @@ class ETFAnalysisService:
             )
 
             # 自动识别交易制度
-            trade_mode = "t0" if ETFConstants.is_t0_etf(etf_code) else "t1"
+            trade_mode = "t0" if ETFConstants.is_t0_etf(etf_code, resolved_name) else "t1"
 
             backtest_res = self.backtest_engine.run_backtest(
                 daily_df=df,
