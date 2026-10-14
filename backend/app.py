@@ -18,6 +18,7 @@ from api import register_routes, register_middleware, setup_cors, setup_logging
 
 # 导入版本信息
 from config import PROJECT_VERSION
+from listen_bind import debug_enabled, resolve_listen_host
 
 # 系统版本号
 VERSION = PROJECT_VERSION
@@ -38,9 +39,9 @@ def create_app():
         app = Flask(__name__)
         app.logger.info("开发环境模式：仅提供API服务")
     
-    # 应用配置
+    # 应用配置。调试器默认关闭，只有显式 FLASK_DEBUG 才打开。
     app.config['ENV'] = FLASK_ENV
-    app.config['DEBUG'] = FLASK_ENV == 'development'
+    app.config['DEBUG'] = debug_enabled()
     app.config['VERSION'] = VERSION
     
     # 设置日志
@@ -127,13 +128,14 @@ if __name__ == '__main__':
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='ETF网格交易策略分析系统')
     parser.add_argument('--port', type=int, default=None, help='服务器端口号')
-    parser.add_argument('--host', type=str, default='0.0.0.0', help='服务器主机地址')
+    parser.add_argument('--host', type=str, default=None, help='服务器主机地址，默认 127.0.0.1')
+    parser.add_argument('--debug', action='store_true', help='显式打开调试器，默认关闭')
     args = parser.parse_args()
-    
-    # 优先级：命令行参数 > 环境变量 > 默认值
+
+    # 优先级：命令行参数 > 环境变量 > 本机回环
     port = args.port or int(os.environ.get('PORT', 5001))
-    host = args.host
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    
+    host = resolve_listen_host(args.host)
+    debug = debug_enabled(args.debug)
+
     app.logger.info(f"启动ETF网格交易策略分析系统，版本: {VERSION}, 端口: {port}")
     app.run(host=host, port=port, debug=debug)

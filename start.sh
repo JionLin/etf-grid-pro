@@ -54,7 +54,7 @@ if check_port 5001; then
     echo "✅ 后端服务已在运行 (端口 5001 活跃)"
 else
     echo "📦 启动后端服务..."
-    uv run python backend/app.py &
+    uv run python backend/app.py --host 127.0.0.1 &
     BACKEND_PID=$!
     backend_ready=0
     for i in {1..12}; do
