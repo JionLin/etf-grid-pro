@@ -26,7 +26,7 @@ const CapitalAnchorSection = memo(function CapitalAnchorSection({
             网格基准价格 (P₀ 锚点)
           </label>
           <span className="text-xs text-blue-700 dark:text-blue-400 font-medium">
-            {benchmarkMode === "custom" ? "✏️ 用户自定义成本锚点" : "⚡ 自动跟随最新收盘市价"}
+            {benchmarkMode === "custom" ? "✏️ 用户自定义成本锚点" : "⚡ 自动跟随盘中最新价"}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -40,7 +40,7 @@ const CapitalAnchorSection = memo(function CapitalAnchorSection({
             }`}
           >
             <div className="font-semibold text-xs text-blue-950 dark:text-blue-300 flex items-center gap-1">
-              <span>⚡ 最新收盘市价 (默认)</span>
+              <span>⚡ 盘中最新价 (默认)</span>
             </div>
             <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
               {etfInfo?.current_price ? `当前现价约 ¥${etfInfo.current_price}` : "自动获取当日最新市场价格"}

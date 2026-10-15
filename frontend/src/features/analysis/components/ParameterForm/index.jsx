@@ -17,6 +17,7 @@ import {
   saveCustomPreset,
   deleteCustomPreset,
   resetToSystemDefault,
+  DEFAULT_STRATEGY_PARAMS,
 } from "@shared/utils/strategyDraftStorage";
 
 /**
@@ -27,16 +28,16 @@ const ParameterFormContainer = forwardRef(function ParameterFormContainer(
   ref,
 ) {
   // 1. 状态管理
-  const [etfCode, setEtfCode] = usePersistedState("etfCode", initialValues?.etfCode || "510300");
-  const [totalCapital, setTotalCapital] = usePersistedState("totalCapital", initialValues?.totalCapital?.toString() || "30000");
-  const [gridType, setGridType] = usePersistedState("gridType", initialValues?.gridType || "等比");
-  const [riskPreference, setRiskPreference] = usePersistedState("riskPreference", initialValues?.riskPreference || "均衡");
-  const [adjustmentCoefficient, setAdjustmentCoefficient] = usePersistedState("adjustmentCoefficient", initialValues?.adjustmentCoefficient || 1.0);
-  const [analysisDays, setAnalysisDays] = usePersistedState("analysisDays", initialValues?.analysisDays || 180);
-  const [reinvestMode, setReinvestMode] = usePersistedState("reinvestMode", initialValues?.reinvestMode || "pool_shares");
-  const [scalingRatio, setScalingRatio] = usePersistedState("scalingRatio", initialValues?.scalingRatio !== undefined ? Number(initialValues.scalingRatio) : 0.1);
-  const [enableScaling, setEnableScaling] = useState(initialValues?.enableScaling !== undefined ? Boolean(initialValues.enableScaling) : Number(scalingRatio) > 0);
-  const [stepMode, setStepMode] = usePersistedState("stepMode", initialValues?.stepMode || "atr");
+  const [etfCode, setEtfCode] = usePersistedState("etfCode", initialValues?.etfCode || DEFAULT_STRATEGY_PARAMS.etfCode);
+  const [totalCapital, setTotalCapital] = usePersistedState("totalCapital", initialValues?.totalCapital?.toString() || DEFAULT_STRATEGY_PARAMS.totalCapital);
+  const [gridType, setGridType] = usePersistedState("gridType", initialValues?.gridType || DEFAULT_STRATEGY_PARAMS.gridType);
+  const [riskPreference, setRiskPreference] = usePersistedState("riskPreference", initialValues?.riskPreference || DEFAULT_STRATEGY_PARAMS.riskPreference);
+  const [adjustmentCoefficient, setAdjustmentCoefficient] = usePersistedState("adjustmentCoefficient", initialValues?.adjustmentCoefficient || DEFAULT_STRATEGY_PARAMS.adjustmentCoefficient);
+  const [analysisDays, setAnalysisDays] = usePersistedState("analysisDays", initialValues?.analysisDays || DEFAULT_STRATEGY_PARAMS.analysisDays);
+  const [reinvestMode, setReinvestMode] = usePersistedState("reinvestMode", initialValues?.reinvestMode || DEFAULT_STRATEGY_PARAMS.reinvestMode);
+  const [scalingRatio, setScalingRatio] = usePersistedState("scalingRatio", initialValues?.scalingRatio !== undefined ? Number(initialValues.scalingRatio) : DEFAULT_STRATEGY_PARAMS.scalingRatio);
+  const [enableScaling, setEnableScaling] = useState(initialValues?.enableScaling !== undefined ? Boolean(initialValues.enableScaling) : Boolean(DEFAULT_STRATEGY_PARAMS.enableScaling));
+  const [stepMode, setStepMode] = usePersistedState("stepMode", initialValues?.stepMode || DEFAULT_STRATEGY_PARAMS.stepMode);
   const [edaSteps, setEdaSteps] = usePersistedState("edaSteps", initialValues?.edaSteps || { small: 5, medium: 15, large: 30 });
   const [atrMultipliers, setAtrMultipliers] = usePersistedState("atrMultipliers", initialValues?.atrMultipliers || { small: 0.6, medium: 1.2, large: 2.5 });
   const [benchmarkMode, setBenchmarkMode] = useState(initialValues?.benchmarkPrice ? "custom" : "market");
@@ -99,6 +100,7 @@ const ParameterFormContainer = forwardRef(function ParameterFormContainer(
     const reset = resetToSystemDefault();
     if (reset) {
       setDraftSnapshot(reset);
+      setEtfCode("");
       handleApplyPreset({ id: "eda_classic", params: reset.current });
     }
   };

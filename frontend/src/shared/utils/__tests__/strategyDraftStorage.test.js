@@ -7,6 +7,8 @@ import {
   saveCustomPreset,
   deleteCustomPreset,
   resetToSystemDefault,
+  quickLaunchParams,
+  DEFAULT_STRATEGY_PARAMS,
 } from "../strategyDraftStorage.js";
 
 // Mock localStorage
@@ -36,8 +38,14 @@ function runTests() {
 
   // 1. 空状态默认加载测试
   let draft = loadDraftSnapshot();
-  if (!draft || draft.version !== 1 || draft.current.etfCode !== "510300") {
-    throw new Error("期望初次加载返回默认 v1 快照");
+  if (!draft || draft.version !== 1 || draft.current.etfCode !== "") {
+    throw new Error("期望初次加载不预选标的");
+  }
+  if (draft.current.stepMode !== "fixed_eda" || draft.current.analysisDays !== 1825) {
+    throw new Error("期望出厂默认为守株 5/15/30 与 1825 天");
+  }
+  if (Number(draft.current.scalingRatio) !== 0 || draft.current.enableScaling !== false) {
+    throw new Error("期望出厂默认为等额");
   }
   console.log("  ✓ 初始快照加载正常");
 
@@ -87,8 +95,14 @@ function runTests() {
   if (draft.current.totalCapital !== "30000" || draft.current.reinvestMode !== "pool_shares") {
     throw new Error("期望恢复为官方出厂标准默认配置");
   }
-  if (draft.current.stepMode !== "atr" || Number(draft.current.scalingRatio) !== 0.1) {
-    throw new Error("期望出厂默认仍为 ATR 与加码 10%");
+  if (draft.current.stepMode !== "fixed_eda" || Number(draft.current.scalingRatio) !== 0) {
+    throw new Error("期望恢复默认仍为守株等额");
+  }
+  if (draft.current.analysisDays !== 1825 || draft.current.etfCode !== "") {
+    throw new Error("期望恢复默认使用 1825 天且不预选标的");
+  }
+  if (draft.current.edaSteps.small !== 5 || draft.current.edaSteps.large !== 30) {
+    throw new Error("期望恢复默认步长为 5/30");
   }
   console.log("  ✓ 一键恢复出厂默认配置正常");
 
@@ -118,7 +132,21 @@ function runTests() {
   if (shouzhu.params.edaSteps.small !== 5 || shouzhu.params.edaSteps.large !== 30) {
     throw new Error("守株预设步长应为 5% / 15% / 30%");
   }
-  console.log("  ✓ 守株预设使用 E大 5/15/30");
+  if (Number(shouzhu.params.scalingRatio) !== 0 || shouzhu.params.analysisDays !== 1825) {
+    throw new Error("守株预设应为等额、1825 天");
+  }
+  const launched = quickLaunchParams({ etfCode: "515220", scalingRatio: 0.1, analysisDays: 365 });
+  if (launched.scalingRatio !== 0.1 || launched.analysisDays !== 365) {
+    throw new Error("立即启动应使用面板上的加码和天数");
+  }
+  const factoryLaunch = quickLaunchParams({ etfCode: "515220" });
+  if (factoryLaunch.scalingRatio !== 0 || factoryLaunch.analysisDays !== 1825 || factoryLaunch.stepMode !== "fixed_eda") {
+    throw new Error("立即启动缺省应等于守株等额");
+  }
+  if (DEFAULT_STRATEGY_PARAMS.etfCode !== "") {
+    throw new Error("出厂默认不预选代码");
+  }
+  console.log("  ✓ 守株预设使用 E大 5/15/30，启动参数来自面板");
 
   console.log("🎉 strategyDraftStorage 全部测试通过！");
 }

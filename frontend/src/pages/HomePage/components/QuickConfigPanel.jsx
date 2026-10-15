@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ArrowRight, Sliders, X, Check } from "lucide-react";
+import { DEFAULT_STRATEGY_PARAMS, quickLaunchParams } from "@shared/utils/strategyDraftStorage";
 
 /**
  * 桌面端快速策略驾驶舱 (QuickConfigPanel)
@@ -12,9 +13,11 @@ export default function QuickConfigPanel({
   onOpenFullForm,
 }) {
   // 核心微调参数状态
-  const [capital, setCapital] = useState(30000);
-  const [stepMode, setStepMode] = useState("atr"); // 'atr' | 'fixed_eda'
-  const [reinvestMode, setReinvestMode] = useState("pool_shares"); // 'pool_shares' | 'cash'
+  const [capital, setCapital] = useState(Number(DEFAULT_STRATEGY_PARAMS.totalCapital));
+  const [stepMode, setStepMode] = useState(DEFAULT_STRATEGY_PARAMS.stepMode);
+  const [reinvestMode, setReinvestMode] = useState(DEFAULT_STRATEGY_PARAMS.reinvestMode);
+  const [scalingRatio, setScalingRatio] = useState(DEFAULT_STRATEGY_PARAMS.scalingRatio);
+  const [analysisDays, setAnalysisDays] = useState(DEFAULT_STRATEGY_PARAMS.analysisDays);
 
   // 当外部选中的标的改变时，同步内部显示
   useEffect(() => {
@@ -47,17 +50,14 @@ export default function QuickConfigPanel({
 
   const handleStartBacktest = () => {
     if (!onLaunch) return;
-    onLaunch({
+    onLaunch(quickLaunchParams({
       etfCode: code,
       totalCapital: capital,
       stepMode,
-      reinvestMode: reinvestMode || "pool_shares",
-      scalingRatio: 0.1, // 与回测矩阵倒金字塔加码 10% 对齐
-      gridType: "等比",
-      riskPreference: "均衡",
-      adjustmentCoefficient: 1.0,
-      analysisDays: 1825, // 默认5年全量回测
-    });
+      reinvestMode,
+      scalingRatio,
+      analysisDays,
+    }));
   };
 
   return (
@@ -76,7 +76,7 @@ export default function QuickConfigPanel({
             </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs font-mono font-semibold text-gray-700 dark:text-gray-300">
-                最新: ¥{price}
+                盘中最新价 ¥{price}
                 {selectedEtf.quote_date ? ` (${selectedEtf.quote_date})` : ""}
               </span>
               {pct !== null && (
@@ -224,6 +224,54 @@ export default function QuickConfigPanel({
             </button>
           </div>
         </div>
+
+        <div className="space-y-1.5">
+          <span className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+            📈 逐格加码
+          </span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[
+              { value: 0, label: "等额" },
+              { value: 0.1, label: "10%" },
+              { value: 0.15, label: "15%" },
+            ].map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => setScalingRatio(option.value)}
+                className={`py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                  Number(scalingRatio) === option.value
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-gray-50 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="text-xs font-bold text-gray-700 dark:text-gray-300 block">
+            🗓️ 回测天数
+          </span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[180, 365, 1825].map((days) => (
+              <button
+                key={days}
+                type="button"
+                onClick={() => setAnalysisDays(days)}
+                className={`py-1.5 text-xs font-mono font-semibold rounded-lg border transition-all ${
+                  Number(analysisDays) === days
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-gray-50 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-600"
+                }`}
+              >
+                {days}天
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* 底部启动按钮与辅助入口 */}
@@ -233,7 +281,7 @@ export default function QuickConfigPanel({
           onClick={handleStartBacktest}
           className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 group cursor-pointer"
         >
-          <span>🚀 立即启动 5 年牛熊回测</span>
+          <span>🚀 立即启动 {analysisDays} 天回测</span>
           <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
         </button>
 

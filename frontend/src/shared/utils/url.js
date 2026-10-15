@@ -32,13 +32,13 @@ export const REVERSE_PARAM_MAPPINGS = {
 
 // 默认参数值
 export const DEFAULT_PARAMS = {
-  capital: "100000",
+  capital: "30000",
   grid: "geometric", // 对应"等比"
   risk: "balanced", // 对应"均衡"
   adjustment: "1.0", // 调节系数默认值
-  stepMode: "atr", // 步长生成模式：'atr' | 'fixed_eda'
-  days: "180", // 历史分析周期：90 | 180 | 365
-  scaling: "0.1", // 逐格加码比例：默认 0.1 (10% 倒金字塔加码)
+  stepMode: "fixed_eda", // 出厂默认：E大守株 5/15/30
+  days: "1825", // 历史分析周期：出厂 5 年
+  scaling: "0", // 出厂等额，加码比例由面板传入
   reinvest: "pool_shares", // 做T收益留存模式：'pool_shares' | 'cash'
   edaSteps: "5,15,30", // E大原版自定义各轨步长比例：默认 5,15,30
   atrMultipliers: "0.6,1.2,2.5", // ATR自适应自定义各轨乘数：默认 0.6,1.2,2.5
