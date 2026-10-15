@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ArrowRight, Sliders, X, Check } from "lucide-react";
 import { DEFAULT_STRATEGY_PARAMS, quickLaunchParams } from "@shared/utils/strategyDraftStorage";
+import { ADVANCED_PANEL_LINK } from "./quickPanelCopy";
 
 /**
  * 桌面端快速策略驾驶舱 (QuickConfigPanel)
@@ -291,7 +292,7 @@ export default function QuickConfigPanel({
             onClick={onOpenFullForm}
             className="w-full py-1 text-center text-[11px] text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 font-medium transition-colors"
           >
-            高级策略微调 (倒金字塔加码 / 三轨乘数) ▼
+            {ADVANCED_PANEL_LINK} ▼
           </button>
         )}
       </div>
