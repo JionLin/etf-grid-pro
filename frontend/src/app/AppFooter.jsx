@@ -23,13 +23,13 @@ export default function AppFooter() {
     fetchVersion();
   }, []);
   return (
-    <footer className="bg-white border-t border-gray-200 mt-16">
+    <footer className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 mt-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* 系统信息 */}
           <div>
-            <h3 className="font-semibold text-gray-900 mb-4">系统特点</h3>
-            <ul className="space-y-2 text-sm text-gray-600">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">系统特点</h3>
+            <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
               <li>• 基于ATR算法的科学分析</li>
               <li>• 4维度量化评分体系</li>
               <li>• 智能网格参数计算</li>
@@ -39,8 +39,8 @@ export default function AppFooter() {
 
           {/* 风险提示 */}
           <div>
-            <h3 className="font-semibold text-gray-900 mb-4">风险提示</h3>
-            <ul className="space-y-2 text-sm text-gray-600">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">风险提示</h3>
+            <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
               <li>• 历史数据不代表未来表现</li>
               <li>• 投资有风险，入市需谨慎</li>
               <li>• 本系统仅供参考，不构成投资建议</li>
@@ -50,8 +50,8 @@ export default function AppFooter() {
 
           {/* 技术支持 */}
           <div>
-            <h3 className="font-semibold text-gray-900 mb-4">技术信息</h3>
-            <ul className="space-y-2 text-sm text-gray-600">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">技术信息</h3>
+            <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
               <li>• 数据源：腾讯财经 / 东方财富</li>
               <li>• 算法：ATR + ADX + 统计分析</li>
               <li>• 更新频率：盘中看行情，日 K 在收盘后增量</li>
@@ -60,8 +60,8 @@ export default function AppFooter() {
           </div>
         </div>
 
-        <div className="border-t border-gray-200 mt-8 pt-8 text-center">
-          <p className="text-sm text-gray-500">
+        <div className="border-t border-gray-200 dark:border-gray-700 mt-8 pt-8 text-center">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             &copy; 2025 ETFer.Top 本系统仅供学习和研究使用，不构成投资建议。
           </p>
         </div>

@@ -10,12 +10,12 @@ import { CloudflareAnalytics } from "@shared/components/analytics";
  */
 export default function AppLayout({ children }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 dark:from-gray-950 dark:via-gray-900 dark:to-slate-950">
       {/* Cloudflare Analytics 脚本注入 */}
       <CloudflareAnalytics />
       <Watermark />
       <AppHeader />
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-w-0">
         {children}
       </main>
       <AppFooter />

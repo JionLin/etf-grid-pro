@@ -164,7 +164,7 @@ const AnalysisReport = ({
       )}
 
       {!loading && analysisComplete && (
-        <div className="bg-white rounded-xl shadow-lg">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-transparent dark:border-gray-700 min-w-0">
           <ReportTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
           <div className="p-6">
@@ -223,8 +223,8 @@ const AnalysisReport = ({
 
       {!loading && analysisComplete && (
         <>
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">讨论与反馈</h3>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-transparent dark:border-gray-700 p-4 sm:p-6 min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">讨论与反馈</h3>
             <div ref={giscusRef} className="giscus-container"></div>
           </div>
           <Disclaimer />

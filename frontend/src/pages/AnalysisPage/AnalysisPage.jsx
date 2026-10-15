@@ -287,23 +287,23 @@ const AnalysisPage = () => {
 
       <div className="space-y-6">
         {/* 页面头部 */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6 min-w-0">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col items-start gap-3 min-w-0 sm:flex-row sm:items-center">
               <button
                 onClick={handleBackToHome}
-                className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shrink-0"
               >
                 <ArrowLeft className="w-4 h-4" />
                 返回首页
               </button>
 
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">
+              <div className="min-w-0">
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 break-words">
                   {analysisData?.etf_info?.name || `ETF`}({etfCode})
                   网格策略分析
                 </h1>
-                <div className="text-sm text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                <div className="text-sm text-gray-600 dark:text-gray-300 flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
                   <span>投资金额：{currentParams?.totalCapital?.toLocaleString()}元</span>
                   <span>|</span>
                   <span>网格类型：{currentParams?.gridType}</span>
