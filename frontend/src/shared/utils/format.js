@@ -104,6 +104,19 @@ export const formatTimestamp = (timestamp) => {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 };
 
+/**
+ * 锚点日期。数字时间戳按本地时区格式化；上海墙钟字符串原样展示。
+ */
+export const formatPriceDate = (value) => {
+  if (typeof value === "number" && !Number.isNaN(value)) {
+    return formatTimestamp(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  return "";
+};
+
 
 
 /**

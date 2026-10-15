@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 import pandas as pd
 from backend.services.data.akshare_client import AkShareClient
@@ -219,6 +220,30 @@ class TestAKShareClientFallbackPagination(unittest.TestCase):
         self.assertEqual(first["current_price"], 1.23)
         self.assertEqual(second["etf_name"], "煤炭ETF")
         mock_spot.assert_called_once()
+
+    def test_tencent_fallback_quote_carries_shanghai_timestamp(self):
+        """盘中腾讯现价的锚点日期是今天，不能再落到上一交易日。"""
+        parts = [""] * 45
+        parts[1] = "煤炭ETF"
+        parts[3] = "1.303"
+        parts[4] = "1.292"
+        parts[5] = "1.300"
+        parts[6] = "1000"
+        parts[31] = "0.011"
+        parts[32] = "0.85"
+        parts[33] = "1.310"
+        parts[34] = "1.290"
+        parts[37] = "6804.765"
+        parts[38] = "1.2"
+        parts[43] = "1.5"
+        with patch.object(self.client, "cached_trading_days", return_value=None):
+            during = self.client._quote_from_tencent_parts(parts, datetime(2026, 10, 15, 11, 20))
+            before_open = self.client._quote_from_tencent_parts(parts, datetime(2026, 10, 15, 9, 0))
+        self.assertEqual(during["timestamp"], "2026-10-15 11:20:00")
+        self.assertEqual(during["trade_date"], "20261015")
+        self.assertEqual(during["current_price"], 1.303)
+        self.assertEqual(before_open["trade_date"], "20261014")
+        self.assertEqual(before_open["timestamp"], "2026-10-15 09:00:00")
 
 
 if __name__ == "__main__":

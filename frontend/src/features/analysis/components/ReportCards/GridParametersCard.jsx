@@ -24,7 +24,7 @@ import {
   ListOrdered,
   LayoutGrid
 } from "lucide-react";
-import { formatCurrency, formatPercent, formatDate, formatTimestamp } from "@shared/utils";
+import { formatCurrency, formatPercent, formatDate, formatPriceDate } from "@shared/utils";
 import StressTestSandboxCard from "./StressTestSandboxCard";
 import { ETF_CATEGORIES } from "@shared/constants/etfCategories";
 
@@ -124,11 +124,9 @@ const GridParametersCard = ({
   const getPriceDateText = () => {
     // 优先使用gridStrategy中的price_date（来自TushareClient::get_latest_price）
     const priceDate = gridStrategy?.price_date;
-    if (priceDate) {
-      const formattedDate = formatTimestamp(priceDate);
-      if (formattedDate) {
-        return `更新时间 ${formattedDate}`;
-      }
+    const formattedDate = formatPriceDate(priceDate);
+    if (formattedDate) {
+      return `更新时间 ${formattedDate}`;
     }
 
     // 回退到dataQuality中的latest_date

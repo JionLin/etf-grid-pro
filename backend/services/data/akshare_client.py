@@ -815,27 +815,35 @@ class AkShareClient:
             parts = resp.text.split('~')
             if len(parts) < 45:
                 return None
-            return {
-                'name': parts[1],
-                'etf_name': parts[1],
-                'current_price': float(parts[3]),
-                'pre_close': float(parts[4]),
-                'open_price': float(parts[5]),
-                'high_price': float(parts[33]),
-                'low_price': float(parts[34]),
-                'change_amount': float(parts[31]),
-                'pct_change': float(parts[32]),
-                'amplitude': float(parts[43]),
-                'volume': int(float(parts[6])),
-                'amount': float(parts[37]) * 10000,
-                'turnover_rate': float(parts[38]) if parts[38] else 0.0,
-                'volume_ratio': 1.0,
-                'iopv': float(parts[3]),
-                'trading_date': self.get_latest_trading_date()
-            }
+            return self._quote_from_tencent_parts(parts, datetime.now(SHANGHAI))
         except Exception as e:
             logger.warning(f"备用行情获取失败: {str(e)}")
             return None
+
+    def _quote_from_tencent_parts(self, parts: list, moment: datetime) -> Dict[str, Any]:
+        """腾讯行情没有交易日字段。锚点日期用上海时间，盘前和休市日回到上一交易日。"""
+        now = as_shanghai(moment)
+        trade_day = self.quote_date_label(now, self.cached_trading_days(now)).replace("-", "")
+        return {
+            'name': parts[1],
+            'etf_name': parts[1],
+            'current_price': float(parts[3]),
+            'pre_close': float(parts[4]),
+            'open_price': float(parts[5]),
+            'high_price': float(parts[33]),
+            'low_price': float(parts[34]),
+            'change_amount': float(parts[31]),
+            'pct_change': float(parts[32]),
+            'amplitude': float(parts[43]),
+            'volume': int(float(parts[6])),
+            'amount': float(parts[37]) * 10000,
+            'turnover_rate': float(parts[38]) if parts[38] else 0.0,
+            'volume_ratio': 1.0,
+            'iopv': float(parts[3]),
+            'timestamp': now.strftime('%Y-%m-%d %H:%M:%S'),
+            'trade_date': trade_day,
+            'trading_date': trade_day,
+        }
 
     def _normalize_calendar_date(self, value: Optional[str]) -> Optional[str]:
         """把 YYYYMMDD 或 YYYY-MM-DD 归一成 YYYY-MM-DD。"""

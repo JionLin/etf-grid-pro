@@ -479,7 +479,7 @@ const BacktestCard = ({
               ¥{summary?.history_meta?.backtest_base_price ? Number(summary.history_meta.backtest_base_price).toFixed(3) : "..."}
             </span>
             <span className="text-slate-300">|</span>
-            <span>最新市价:</span>
+            <span>窗口末日收盘:</span>
             <span className="font-bold text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded">
               ¥{summary?.history_meta?.latest_market_price ? Number(summary.history_meta.latest_market_price).toFixed(3) : "..."}
             </span>

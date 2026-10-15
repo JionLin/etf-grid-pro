@@ -315,7 +315,8 @@ class ETFAnalysisService:
             etf_info = self.get_etf_basic_info(etf_code)
             latest_price_info = {
                 "current_price": etf_info.get("current_price"),
-                "timestamp": etf_info.get("trade_timestamp", ""),
+                "timestamp": etf_info.get("trade_timestamp") or etf_info.get("trade_date") or "",
+                "trade_date": etf_info.get("trade_date") or "",
             }
             if latest_price_info["current_price"] in (None, ""):
                 raise ValueError(f"未获取到ETF最新价格: {etf_code}")
@@ -674,7 +675,7 @@ class ETFAnalysisService:
                 'current_price': current_price,
                 'benchmark_price': anchor_price,
                 'is_custom_benchmark': round(anchor_price, 4) != round(current_price, 4),
-                'price_date': latest_price_info.get('timestamp', ''),  # 价格数据更新时间
+                'price_date': latest_price_info.get('timestamp') or latest_price_info.get('trade_date') or '',
                 'step_mode': step_mode,
                 'price_range': {
                     'lower': round(derived_lower, 3),

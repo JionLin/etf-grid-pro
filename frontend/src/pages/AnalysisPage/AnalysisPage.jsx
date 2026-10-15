@@ -345,7 +345,7 @@ const AnalysisPage = () => {
                         </span>
                         {backtestMeta.latest_market_price != null && (
                           <span className="text-[10px] text-gray-500 ml-0.5">
-                            (现价 ¥{Number(backtestMeta.latest_market_price).toFixed(3)})
+                            (窗口末日收盘 ¥{Number(backtestMeta.latest_market_price).toFixed(3)})
                           </span>
                         )}
                       </span>
