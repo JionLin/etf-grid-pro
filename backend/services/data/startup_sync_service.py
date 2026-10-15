@@ -14,7 +14,7 @@ from repositories.db_config import db_type, sqlite_path
 from repositories.mysql_connection import DEFAULT_DATABASE, connect
 from repositories.universe_matrix_repository import UniverseMatrixRepository
 from services.analysis.universe_matrix_backtest_service import UniverseMatrixBacktestService
-from services.data.akshare_client import AkShareClient
+from services.data.akshare_client import AkShareClient, kline_batch_note
 from services.data.market_clock import (
     as_shanghai,
     expected_settled_date,
@@ -85,11 +85,20 @@ def resume_universe_bootstrap(
         if progress_callback:
             progress_callback(result, index, total)
 
+    worker_count = max(1, min(3, int(workers or 3)))
     summary = sync_service.sync_universe(
         instruments=pending,
         is_incremental=False,
-        workers=workers,
+        workers=worker_count,
         progress_callback=_record,
+    )
+    progress = bootstrap_repo.progress()
+    logger.info(
+        kline_batch_note(
+            progress["done"],
+            progress["total"],
+            int(summary.get("failed_count") or 0),
+        )
     )
     for result in summary.get("results") or []:
         bootstrap_repo.record_result(result)

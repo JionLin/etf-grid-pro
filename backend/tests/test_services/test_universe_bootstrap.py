@@ -190,6 +190,56 @@ def test_twenty_instruments_do_not_skip_an_unfinished_universe():
     _wipe(repo)
 
 
+def test_transport_failure_stays_pending_and_empty_payload_is_done():
+    repo = UniverseBootstrapRepository()
+    _wipe(repo)
+    repo.prepare([{"etf_code": "990401", "etf_name": "甲"}], set())
+    repo.record_result({
+        "etf_code": "990401",
+        "status": "failed",
+        "error": "SSLError(SSLEOFError(8, 'UNEXPECTED_EOF_WHILE_READING'))",
+    })
+    assert [row["etf_code"] for row in repo.pending_instruments()] == ["990401"]
+    assert repo.progress()["done"] == 0
+
+    repo.record_result({
+        "etf_code": "990401",
+        "status": "failed",
+        "error": "拉取到的行情数据为空",
+    })
+    assert repo.pending_instruments() == []
+    assert repo.progress()["done"] == 1
+    assert repo.progress()["active"] is False
+    _wipe(repo)
+
+
+def test_bootstrap_uses_at_most_three_workers():
+    repo = UniverseBootstrapRepository()
+    _wipe(repo)
+    sync_service = MagicMock()
+    sync_service.sync_universe.return_value = {
+        "synced": 0,
+        "skipped": 0,
+        "failed_count": 1,
+        "results": [{
+            "etf_code": "990361",
+            "status": "failed",
+            "error": "SSL: UNEXPECTED_EOF_WHILE_READING",
+        }],
+    }
+    resume_universe_bootstrap(
+        bootstrap_repo=repo,
+        market_repo=MarketDataRepository(),
+        sync_service=sync_service,
+        list_loader=lambda: [{"etf_code": "990361", "etf_name": "甲"}],
+        pool_builder=MagicMock(),
+        workers=5,
+    )
+    assert sync_service.sync_universe.call_args.kwargs["workers"] == 3
+    assert [row["etf_code"] for row in repo.pending_instruments()] == ["990361"]
+    _wipe(repo)
+
+
 def test_full_universe_sync_uses_the_market_list_not_the_current_pool():
     repo = UniverseBootstrapRepository()
     _wipe(repo)

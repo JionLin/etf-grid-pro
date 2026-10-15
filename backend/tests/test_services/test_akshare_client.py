@@ -15,9 +15,19 @@ from backend.tests.mysql_gate import skip_without_mysql
 class TestAKShareClientFallbackPagination(unittest.TestCase):
     def setUp(self):
         skip_without_mysql()
+        from backend.services.data.akshare_client import _kline_pacer, reset_kline_transport
+
+        reset_kline_transport()
+        _kline_pacer.interval = 0
+        _kline_pacer.jitter = 0
         reset_business_tables(TEST_DATABASE)
         self.client = AkShareClient()
         self.client.market_repo = MarketDataRepository(database=TEST_DATABASE)
+
+    def tearDown(self):
+        from backend.services.data.akshare_client import reset_kline_transport
+
+        reset_kline_transport()
 
     def test_get_fallback_kline_multi_page(self):
         """测试备用K线源分段循环拉取与去重合并"""

@@ -69,7 +69,7 @@ def test_sync_does_not_store_today_before_close(monkeypatch):
         "amount": [1_000_000.0, 9_000_000_000.0],
     })
     client = MagicMock()
-    client._get_fallback_kline.return_value = frame
+    client.fetch_history_kline.return_value = frame
     market_repo = MagicMock()
     market_repo.get_date_range.return_value = {
         "total_count": 0,
@@ -101,7 +101,7 @@ def test_incremental_sync_refetches_when_last_close_is_missing(monkeypatch):
         "amount": [1000.0],
     })
     client = MagicMock()
-    client._get_fallback_kline.return_value = fresh
+    client.fetch_history_kline.return_value = fresh
     market_repo = MagicMock()
     market_repo.get_date_range.return_value = {
         "total_count": 20,
@@ -113,7 +113,7 @@ def test_incremental_sync_refetches_when_last_close_is_missing(monkeypatch):
     result = service.sync_single_etf("515220", is_incremental=True)
     assert result["status"] == "synced"
     market_repo.delete_preclose_session_bars.assert_called_once()
-    client._get_fallback_kline.assert_called_once()
+    client.fetch_history_kline.assert_called_once()
 
     market_repo.get_date_range.return_value["max_date"] = "2026-10-15"
     done = service.sync_single_etf("515220", is_incremental=True)

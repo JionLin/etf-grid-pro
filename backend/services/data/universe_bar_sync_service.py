@@ -1,5 +1,4 @@
 import logging
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -85,48 +84,44 @@ class UniverseBarSyncService:
                 else:
                     target_start = (latest_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        # 通过重试拉取数据
-        last_error = None
-        for attempt in range(1, max_retries + 1):
-            try:
-                # 优先使用 Tencent 备用前复权源（绕过代理且 5 年数据分段完整）
-                df = self.client._get_fallback_kline(
-                    clean_code,
-                    start_date=target_start,
-                    end_date=target_end,
-                )
+        # 源内退避和熔断在 fetch_history_kline。max_retries 只保留给旧调用方，不再按代码打三轮。
+        if max_retries < 1:
+            logger.debug("忽略非正的 max_retries=%s", max_retries)
+        try:
+            df = self.client.fetch_history_kline(
+                clean_code,
+                start_date=target_start,
+                end_date=target_end,
+            )
 
-                if df is not None and not df.empty:
-                    df = drop_unfinished_session_bar(df)
-                if df is not None and not df.empty:
-                    saved = self.market_repo.save_bars(clean_code, df)
-                    updated_stat = self.market_repo.get_date_range(clean_code)
-                    return {
-                        "etf_code": clean_code,
-                        "status": "synced",
-                        "rows_added": saved,
-                        "total_rows": updated_stat.get("total_count", 0),
-                        "min_date": updated_stat.get("min_date"),
-                        "max_date": updated_stat.get("max_date"),
-                        "error": None,
-                    }
-                else:
-                    # 如果是增量模式，且区间较短，没有新数据可能只是非交易日
-                    if is_incremental:
-                        return {
-                            "etf_code": clean_code,
-                            "status": "skipped",
-                            "rows_added": 0,
-                            "total_rows": local_count,
-                            "min_date": local_min,
-                            "max_date": local_max,
-                            "error": None,
-                        }
-                    last_error = "拉取到的行情数据为空"
-            except Exception as exc:
-                last_error = str(exc)
-                logger.warning(f"拉取 {clean_code} 第 {attempt} 次失败: {exc}")
-                time.sleep(0.3 * attempt)
+            if df is not None and not df.empty:
+                df = drop_unfinished_session_bar(df)
+            if df is not None and not df.empty:
+                saved = self.market_repo.save_bars(clean_code, df)
+                updated_stat = self.market_repo.get_date_range(clean_code)
+                return {
+                    "etf_code": clean_code,
+                    "status": "synced",
+                    "rows_added": saved,
+                    "total_rows": updated_stat.get("total_count", 0),
+                    "min_date": updated_stat.get("min_date"),
+                    "max_date": updated_stat.get("max_date"),
+                    "error": None,
+                }
+            if is_incremental:
+                return {
+                    "etf_code": clean_code,
+                    "status": "skipped",
+                    "rows_added": 0,
+                    "total_rows": local_count,
+                    "min_date": local_min,
+                    "max_date": local_max,
+                    "error": None,
+                }
+            last_error = "拉取到的行情数据为空"
+        except Exception as exc:
+            last_error = str(exc)
+            logger.debug("拉取 %s 失败: %s", clean_code, exc)
 
         return {
             "etf_code": clean_code,
