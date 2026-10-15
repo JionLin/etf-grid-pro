@@ -14,6 +14,7 @@ const nodeTests = [
   "src/features/analysis/components/ReportCards/resultHeadline.test.js",
   "src/shared/components/ui/loadingCopy.test.js",
   "src/features/analysis/components/ParameterForm/sections/stepModeLabels.test.js",
+  "src/features/analysis/components/ReportCards/ledgerView.test.js",
 ];
 
 const scriptTests = [

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ledgerOrderRecords } from "./brokerOrderSheet";
+import { visibleLedgerOrders, voidedLedgerCount } from "./ledgerView";
 
 const GRID_STATUSES = ["未挂", "已挂", "已成", "作废"];
 const BASE_STATUSES = ["待买入", "已成", "作废"];
@@ -22,6 +23,7 @@ export default function OrderLedgerCard({
   const [plan, setPlan] = useState(null);
   const [message, setMessage] = useState("");
   const [staleOrders, setStaleOrders] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   const load = async (price) => {
     if (!etfCode) return;
@@ -79,7 +81,8 @@ export default function OrderLedgerCard({
     if (json.success && json.data) setPlan(json.data);
   };
 
-  const rows = plan?.orders || [];
+  const rows = visibleLedgerOrders(plan?.orders, showHistory);
+  const hiddenVoids = voidedLedgerCount(plan?.orders);
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -89,13 +92,24 @@ export default function OrderLedgerCard({
             保存在本机数据库。状态可标成未挂、已挂、已成、作废。留利润不会自动执行。
           </p>
         </div>
-        <button
-          type="button"
-          onClick={save}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white"
-        >
-          保存当前挂单
-        </button>
+        <div className="flex items-center gap-2">
+          {hiddenVoids > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHistory((value) => !value)}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 bg-white text-slate-700"
+            >
+              {showHistory ? "收起历史" : `历史 ${hiddenVoids}`}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => save()}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 text-white"
+          >
+            保存当前挂单
+          </button>
+        </div>
       </div>
       {message && <p className="text-xs text-slate-600">{message}</p>}
       {staleOrders.length > 0 && (
@@ -123,7 +137,11 @@ export default function OrderLedgerCard({
         </div>
       )}
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-400">还没有保存。保存后会按现价标出今天可能成交的未完成单。</p>
+        <p className="text-xs text-slate-400">
+          {hiddenVoids > 0 && !showHistory
+            ? "作废单已收进历史。当前没有未挂、已挂或已成的委托。"
+            : "还没有保存。保存后会按现价标出今天可能成交的未完成单。"}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -138,7 +156,7 @@ export default function OrderLedgerCard({
             </thead>
             <tbody>
               {rows.map((order) => (
-                <tr key={order.id} className="border-t border-slate-200">
+                <tr key={order.id} className={`border-t border-slate-200 ${order.status === "作废" ? "text-slate-400" : ""}`}>
                   <td className="py-1.5">{order.side}</td>
                   <td className="text-right font-mono">{Number(order.trigger_price).toFixed(3)}</td>
                   <td className="text-right font-mono">{order.shares}</td>
