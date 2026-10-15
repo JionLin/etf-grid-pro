@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import CrisisReplayModal from "./CrisisReplayModal";
 import { isAbortError, runBacktest } from "@shared/services/api";
+import { cashYieldPct, formatSignedPercent, winRateDetail } from "./resultHeadline";
 
 function calculateProfitAttribution(summary, profitPool) {
   if (!summary) return null;
@@ -614,20 +615,20 @@ const BacktestCard = ({
               </div>
             </div>
 
-            {/* 5. 胜率与风控 */}
+            {/* 5. 年化做T 与最大回撤 */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-purple-50/80 to-white border border-purple-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
-                <span>闭环胜率 / 最大回撤</span>
+                <span>年化做T / 最大回撤</span>
                 <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-purple-900 font-mono">
-                  {summary.win_rate == null ? "—" : `${summary.win_rate}%`}
+                  {formatSignedPercent(cashYieldPct(summary))}
                 </span>
                 <span className="text-xs text-gray-500 font-mono">回撤 {summary.max_drawdown}%</span>
               </div>
               <div className="text-[11px] text-gray-500 mt-1 truncate" title={`总成交 ${summary.total_trades_count} 笔 (买${summary.buy_trades_count}/卖${summary.sell_trades_count})`}>
-                总成交 {summary.total_trades_count} 笔
+                差价现金利润折年，总成交 {summary.total_trades_count} 笔
               </div>
               {summary.unclosed_profit > 0 && (
                 <div className="text-[11px] text-amber-600 mt-0.5 truncate" title="底仓高抛后未按设计回调价买回的卖出，该部分利润为预估未实现">
@@ -636,6 +637,9 @@ const BacktestCard = ({
               )}
             </div>
           </div>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+            {winRateDetail(summary)}
+          </p>
 
           {/* 策略韧性与资金画像看板 (Sortino / 最长解套周期 / 资金利用率与安全垫) */}
           <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 via-gray-50/50 to-white border border-gray-200/80 shadow-2xs space-y-3">

@@ -153,6 +153,8 @@ def test_rank_score_uses_cash_yield_and_does_not_saturate():
     assert closed_loop_win_rate([
         {"action": "SELL", "slot_type": "SELL_GRID", "profit": 10},
     ]) is None
+    from backend.services.analysis.backtest_engine import annualized_cash_yield_pct
+    assert annualized_cash_yield_pct(3000, 30000, 365) == 10.0
 
 
 def test_short_history_is_marked_insufficient():

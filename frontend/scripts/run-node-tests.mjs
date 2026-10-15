@@ -11,6 +11,7 @@ const nodeTests = [
   "src/features/analysis/components/ReportCards/archiveFilters.test.js",
   "src/features/analysis/components/ReportCards/brokerOrderSheet.test.js",
   "src/features/analysis/components/ParameterForm/anchorRequest.test.js",
+  "src/features/analysis/components/ReportCards/resultHeadline.test.js",
 ];
 
 const scriptTests = [
