@@ -53,3 +53,19 @@ test("ledger keeps one row per track while the broker sheet still merges", () =>
   assert.equal(ledger[1].shares, 500);
   assert.equal(ledger[2].shares, 500);
 });
+
+test("broker csv starts with a UTF-8 BOM and keeps the merged sheet", () => {
+  const csv = buildBrokerOrderCsv({
+    code: "515220",
+    anchorPrice: 1.25,
+    basePosition: { shares: 12000, current_price: 1.25 },
+    orders: [
+      { action: "SELL", price: 1.317, shares: 400, tag: "小网" },
+      { action: "SELL", price: 1.317, shares: 300, tag: "中网" },
+    ],
+  });
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  assert.match(csv, /515220,买入,1\.250,12000,底仓/);
+  assert.match(csv, /515220,卖出,1\.317,700,同价2笔已合并/);
+  assert.match(csv, /留利润不会自动执行/);
+});

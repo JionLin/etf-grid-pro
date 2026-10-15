@@ -125,13 +125,18 @@ const GridParametersCard = ({
 
   const handleCopyBrokerSheet = (orders, baseInfo) => {
     const symbolCode = inputParameters?.etfCode || inputParameters?.etf_code || "";
-    const text = buildBrokerOrderSheet({
+    const payload = {
       code: symbolCode,
       orders,
       basePosition: baseInfo,
       anchorPrice: benchmarkPrice || current_price,
-    });
-    navigator.clipboard.writeText(text);
+    };
+    const text = buildBrokerOrderSheet(payload);
+    downloadBrokerOrderCsv(payload);
+    const write = navigator.clipboard?.writeText?.(text);
+    if (write && typeof write.catch === "function") {
+      write.catch(() => {});
+    }
     setCopiedKey("copy_broker_sheet");
     setTimeout(() => setCopiedKey(null), 2500);
   };
@@ -543,17 +548,17 @@ const GridParametersCard = ({
                     handleCopyBrokerSheet(list, selectedRail === "all" ? comp?.base_position : null);
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors shadow-2xs"
-                  title="复制成券商条件单表格：代码、方向、触发价、股数、备注"
+                  title="复制条件单表格，并下载一份带 BOM 的 csv，方便用 Numbers 或 Excel 打开"
                 >
                   {copiedKey === "copy_broker_sheet" ? (
                     <>
                       <Check className="w-3.5 h-3.5 text-green-600" />
-                      <span className="text-green-700 font-bold">已复制条件单表格</span>
+                      <span className="text-green-700 font-bold">已复制并下载条件单</span>
                     </>
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5" />
-                      <span>复制条件单表格</span>
+                      <span>复制并下载条件单表格</span>
                     </>
                   )}
                 </button>
