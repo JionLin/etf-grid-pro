@@ -10,6 +10,7 @@ const nodeTests = [
   "src/features/analysis/components/ReportCards/gridFitDisplay.test.js",
   "src/features/analysis/components/ReportCards/archiveFilters.test.js",
   "src/features/analysis/components/ReportCards/brokerOrderSheet.test.js",
+  "src/features/analysis/components/ParameterForm/anchorRequest.test.js",
 ];
 
 const scriptTests = [

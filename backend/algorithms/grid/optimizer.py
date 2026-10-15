@@ -124,7 +124,7 @@ class GridOptimizer:
                 },
                 'large': {
                     'rail': 'large',
-                    'name': '大网 (估值防守)',
+                    'name': '大网 (深档防守)',
                     'tag': '大网',
                     'capital_ratio': 0.45,
                     'base_multiplier': 2.5,

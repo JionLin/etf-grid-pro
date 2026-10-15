@@ -334,7 +334,10 @@ class ETFAnalysisService:
                            step_mode: str = 'atr',
                            benchmark_price: Optional[float] = None,
                            eda_step_ratios: Optional[Dict[str, float]] = None,
-                           atr_multipliers: Optional[Dict[str, float]] = None) -> Dict:
+                           atr_multipliers: Optional[Dict[str, float]] = None,
+                           anchor_source: str = "market",
+                           valuation_percentile: Optional[float] = None,
+                           dual_ma_price: Optional[float] = None) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -365,6 +368,18 @@ class ETFAnalysisService:
             
             # 2. 获取历史数据（根据指定天数，默认180天）
             df = self.get_historical_data(etf_code, days=analysis_days)
+            from services.analysis.anchor_price import resolve_grid_anchor
+
+            anchor_price, anchor_label = resolve_grid_anchor(
+                anchor_source,
+                live_price=float(latest_price_info["current_price"]),
+                closes=df["close"].tolist() if "close" in df.columns else [],
+                manual_price=benchmark_price,
+                percentile=valuation_percentile,
+                dual_ma_price=dual_ma_price,
+            )
+            if anchor_source in ("percentile", "dual_ma", "manual", "custom"):
+                benchmark_price = anchor_price
             
             # 4. 执行适宜度评估（只看网格体格，不引入估值）
             suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
@@ -387,6 +402,8 @@ class ETFAnalysisService:
                 eda_step_ratios=eda_step_ratios,
                 atr_multipliers=atr_multipliers,
             )
+            grid_params["anchor_label"] = anchor_label
+            grid_params["anchor_source"] = anchor_source
             
             # 5. 生成策略分析依据
             strategy_rationale = self._generate_strategy_rationale(

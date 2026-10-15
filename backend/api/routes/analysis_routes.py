@@ -18,6 +18,16 @@ from services.analysis.literature_paths import resolve_eda_literature
 
 # 创建分析蓝图
 analysis_bp = Blueprint('analysis', __name__)
+
+
+def _optional_anchor_float(value):
+    if value in (None, "", "null"):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 or number == 0 else None
 etf_service = ETFAnalysisService()
 backtest_repo = BacktestRepository()
 pool_repo = ETFPoolRepository()
@@ -182,6 +192,9 @@ def analyze_etf_strategy():
             benchmark_price=benchmark_price,
             eda_step_ratios=eda_step_ratios,
             atr_multipliers=atr_multipliers,
+            anchor_source=str(data.get('anchorSource', data.get('anchor_source', data.get('benchmarkMode', 'market'))) or 'market'),
+            valuation_percentile=_optional_anchor_float(data.get('valuationPercentile', data.get('valuation_percentile'))),
+            dual_ma_price=_optional_anchor_float(data.get('dualMaPrice', data.get('dual_ma_price'))),
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "

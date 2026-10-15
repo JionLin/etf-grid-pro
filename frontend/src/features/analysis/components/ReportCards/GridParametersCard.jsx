@@ -432,7 +432,7 @@ const GridParametersCard = ({
           </div>
           {isCustomBenchmark && (
             <div className="shrink-0 flex items-center gap-1.5 text-xs font-mono font-semibold bg-white/80 px-2.5 py-1 rounded-lg border border-amber-300 text-amber-900">
-              <span>⚓ 中心锚点: ¥{Number(benchmarkPrice).toFixed(3)}</span>
+              <span>⚓ 中心锚点: ¥{Number(benchmarkPrice).toFixed(3)}{gridStrategy?.anchor_label ? ` · ${gridStrategy.anchor_label}` : ""}</span>
               <span className="text-[10px] text-gray-500 font-sans">(现价: ¥{current_price})</span>
             </div>
           )}

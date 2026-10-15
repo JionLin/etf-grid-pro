@@ -19,6 +19,7 @@ import {
   resetToSystemDefault,
   DEFAULT_STRATEGY_PARAMS,
 } from "@shared/utils/strategyDraftStorage";
+import { anchorRequestFields } from "./anchorRequest";
 
 /**
  * 参数表单容器组件 (支持渐进式披露与子组件解耦)
@@ -42,6 +43,8 @@ const ParameterFormContainer = forwardRef(function ParameterFormContainer(
   const [atrMultipliers, setAtrMultipliers] = usePersistedState("atrMultipliers", initialValues?.atrMultipliers || { small: 0.6, medium: 1.2, large: 2.5 });
   const [benchmarkMode, setBenchmarkMode] = useState(initialValues?.benchmarkPrice ? "custom" : "market");
   const [customPrice, setCustomPrice] = useState(initialValues?.benchmarkPrice ? initialValues.benchmarkPrice.toString() : "");
+  const [valuationPercentile, setValuationPercentile] = useState(initialValues?.valuationPercentile?.toString() || "50");
+  const [dualMaPrice, setDualMaPrice] = useState(initialValues?.dualMaPrice?.toString() || "");
 
   // 极客微调面板渐进式折叠状态
   const [isAdvancedExpanded, setIsAdvancedExpanded] = useState(false);
@@ -218,7 +221,12 @@ const ParameterFormContainer = forwardRef(function ParameterFormContainer(
         large: Number(edaSteps?.large || 30) / 100,
       } : undefined,
       atrMultipliers: stepMode === "atr" ? atrMultipliers : undefined,
-      benchmarkPrice: (benchmarkMode === "custom" && customPrice) ? parseFloat(customPrice) : null,
+      ...anchorRequestFields({
+        mode: benchmarkMode,
+        customPrice,
+        percentile: valuationPercentile,
+        dualMaPrice,
+      }),
     };
 
     if (!checkDisclaimerStatus()) {
@@ -285,6 +293,10 @@ const ParameterFormContainer = forwardRef(function ParameterFormContainer(
           onBenchmarkModeChange={setBenchmarkMode}
           customPrice={customPrice}
           onCustomPriceChange={setCustomPrice}
+          valuationPercentile={valuationPercentile}
+          onValuationPercentileChange={setValuationPercentile}
+          dualMaPrice={dualMaPrice}
+          onDualMaPriceChange={setDualMaPrice}
           etfInfo={etfInfo}
         />
 

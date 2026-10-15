@@ -64,7 +64,7 @@ export function calculateStressTestScenario(
   const railStats = {
     small: { name: "小网 (高频做T)", tag: "小网", total: 0, triggered: 0, shares: 0, cost: 0, color: "emerald" },
     medium: { name: "中网 (波段巡航)", tag: "中网", total: 0, triggered: 0, shares: 0, cost: 0, color: "blue" },
-    large: { name: "大网 (估值防守)", tag: "大网", total: 0, triggered: 0, shares: 0, cost: 0, color: "purple" },
+    large: { name: "大网 (深档防守)", tag: "大网", total: 0, triggered: 0, shares: 0, cost: 0, color: "purple" },
   };
 
   let cashLeft = liquidCapital;

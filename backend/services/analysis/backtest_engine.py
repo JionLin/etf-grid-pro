@@ -202,7 +202,7 @@ class GridSlot:
     """网格配对槽位数据模型"""
     slot_id: str                # 槽位唯一标识 (如 small_buy_1, medium_sell_2)
     rail: str                   # 轨道代号 (small, medium, large)
-    rail_name: str              # 轨道中文名 (小网 (高频做T), 中网 (波段巡航), 大网 (估值防守))
+    rail_name: str              # 轨道中文名 (小网 (高频做T), 中网 (波段巡航), 大网 (深档防守))
     tag: str                    # 轨道短标签 (小网, 中网, 大网)
     slot_type: str              # 槽位类型: 'BUY_GRID' (向下吸筹对冲) 或 'SELL_GRID' (向上高抛对冲)
     level: int                  # 档位序号 (1 ~ 5)
@@ -408,7 +408,7 @@ class GridBacktestEngine:
         rail_stats = {
             "small": {"name": "小网 (高频做T)", "tag": "小网", "trades_count": 0, "profit": 0.0},
             "medium": {"name": "中网 (波段巡航)", "tag": "中网", "trades_count": 0, "profit": 0.0},
-            "large": {"name": "大网 (估值防守)", "tag": "大网", "trades_count": 0, "profit": 0.0},
+            "large": {"name": "大网 (深档防守)", "tag": "大网", "trades_count": 0, "profit": 0.0},
         }
 
         # 最大回撤从首个净值点起算（peak 初始为 0，而非初始本金，避免首日建仓浮亏被误计入回撤）
