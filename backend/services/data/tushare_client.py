@@ -14,9 +14,9 @@ class TushareClient:
     
     def __init__(self, cache_dir: str = "../cache"):
         """初始化Tushare客户端"""
-        self.token = os.getenv('TUSHARE_TOKEN')
-        if not self.token:
-            raise ValueError("TUSHARE_TOKEN环境变量未设置")
+        self.token = (os.getenv('TUSHARE_TOKEN') or '').strip()
+        if not self.token or self.token == 'your_real_tushare_token_here':
+            raise ValueError("使用 Tushare 时才需要 TUSHARE_TOKEN，请在 .env 填写后再调用")
         
         ts.set_token(self.token)
         self.pro = ts.pro_api()

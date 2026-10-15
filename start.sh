@@ -11,7 +11,7 @@ if [ ! -f ".env" ]; then
     echo "=================================="
     echo "💡 快速初始化指南："
     echo "  1. 复制配置文件模板:  cp .env.example .env"
-    echo "  2. 编辑 .env。默认 SQLite，无需 MySQL。Tushare Token 免费注册: https://tushare.pro/register"
+    echo "  2. 编辑 .env。默认 SQLite，无需 MySQL。Tushare Token 可留空，只有调用 Tushare 时才要填"
     echo "=================================="
     exit 1
 fi
