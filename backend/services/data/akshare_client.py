@@ -27,6 +27,45 @@ logger = logging.getLogger(__name__)
 
 SPOT_QUOTE_TTL_SECONDS = 45
 SINA_CATEGORY_TIMEOUT_SECONDS = 10
+EASTMONEY_FAILURE_LIMIT = 2
+POOL_REBUILD_COOLDOWN_SECONDS = 600
+_eastmoney_lock = threading.Lock()
+_eastmoney_failures = 0
+_eastmoney_open = False
+
+
+def eastmoney_circuit_open() -> bool:
+    """东财连续失败后，本进程剩余请求直接走腾讯。"""
+    return _eastmoney_open
+
+
+def note_eastmoney_success() -> None:
+    global _eastmoney_failures
+    with _eastmoney_lock:
+        if not _eastmoney_open:
+            _eastmoney_failures = 0
+
+
+def note_eastmoney_failure() -> None:
+    global _eastmoney_failures, _eastmoney_open
+    with _eastmoney_lock:
+        _eastmoney_failures += 1
+        if _eastmoney_failures >= EASTMONEY_FAILURE_LIMIT and not _eastmoney_open:
+            _eastmoney_open = True
+            logger.warning(
+                "东方财富连续失败 %s 次，本进程日K和行情改走腾讯",
+                _eastmoney_failures,
+            )
+
+
+def reset_eastmoney_circuit() -> None:
+    """测试隔离。运行中的进程不主动闭合熔断。"""
+    global _eastmoney_failures, _eastmoney_open
+    with _eastmoney_lock:
+        _eastmoney_failures = 0
+        _eastmoney_open = False
+
+
 _SINA_CATEGORY_URL = (
     "https://vip.stock.finance.sina.com.cn/quotes_service/api/jsonp.php/"
     "IO.XSRV2.CallbackList['da_yPT46_Ll7K6WD']/Market_Center.getHQNodeDataSimple"
@@ -65,6 +104,7 @@ class AkShareClient:
         self._spot_frame = None
         self._spot_fetched_at = 0.0
         self._quote_cache: Dict[str, tuple] = {}
+        self._pool_rebuild_at = 0.0
         
         logger.info("AkShare客户端初始化成功（集成 SQLite 时序行情湖版本）")
 
@@ -86,33 +126,45 @@ class AkShareClient:
 
     def _load_spot_frame(self) -> pd.DataFrame:
         """全市场现货表 45 秒内只拉一次，单代码查询共用这一份。"""
+        if eastmoney_circuit_open():
+            raise RuntimeError("东方财富熔断已打开，跳过全市场现货")
         now = time.monotonic()
         with self._spot_lock:
             if self._spot_frame is not None and now - self._spot_fetched_at < SPOT_QUOTE_TTL_SECONDS:
                 return self._spot_frame
-        frame = ak.fund_etf_spot_em()
+        try:
+            frame = ak.fund_etf_spot_em()
+        except Exception:
+            note_eastmoney_failure()
+            raise
+        note_eastmoney_success()
         with self._spot_lock:
             self._spot_frame = frame
             self._spot_fetched_at = time.monotonic()
         return frame
     
     def _fetch_raw_kline_network(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
-        """向网络接口请求原始日 K 线（优先 AkShare，网络受阻时走备用分段源）"""
+        """向网络接口请求原始日 K 线。东财连续失败后，本进程直接走腾讯。"""
         clean_code = etf_code.split(".")[0]
         s_date = start_date.replace("-", "")
         e_date = end_date.replace("-", "")
-        try:
-            df = ak.fund_etf_hist_em(
-                symbol=clean_code,
-                period="daily",
-                start_date=s_date,
-                end_date=e_date,
-                adjust="qfq"
-            )
-            if df is not None and not df.empty:
-                return self._convert_akshare_daily_to_tushare_format(df)
-        except Exception as e:
-            logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
+        if eastmoney_circuit_open():
+            logger.info("东方财富熔断已打开，日K直接走腾讯 (%s)", clean_code)
+        else:
+            try:
+                df = ak.fund_etf_hist_em(
+                    symbol=clean_code,
+                    period="daily",
+                    start_date=s_date,
+                    end_date=e_date,
+                    adjust="qfq"
+                )
+                if df is not None and not df.empty:
+                    note_eastmoney_success()
+                    return self._convert_akshare_daily_to_tushare_format(df)
+            except Exception as e:
+                note_eastmoney_failure()
+                logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
 
         return self._get_fallback_kline(clean_code, days=days, start_date=start_date, end_date=end_date)
 
@@ -1269,6 +1321,13 @@ class AkShareClient:
         self._remember_quote_date(code, updated["quote_date"])
         updates.append((code, last["close"], last["pct_change"]))
 
+    def _pool_rebuild_on_cooldown(self) -> bool:
+        """池子不满 20 只时，首页轮询不能每次都重拉全市场列表。"""
+        last = float(getattr(self, "_pool_rebuild_at", 0.0) or 0.0)
+        if last <= 0:
+            return False
+        return (time.monotonic() - last) < POOL_REBUILD_COOLDOWN_SECONDS
+
     def build_or_get_etf_pool(
         self,
         min_amount_10k: float = 0.0,
@@ -1290,7 +1349,14 @@ class AkShareClient:
                 refreshed = self._overlay_live_quotes(existing)
                 logger.info(f"✓ 从本地标的池直出 {len(refreshed)} 只，并覆盖实时最新价")
                 return refreshed
+            if self._pool_rebuild_on_cooldown():
+                logger.info(
+                    "本地标的池不足 20 只，全市场列表仍在冷却期，返回已落库的 %s 只",
+                    len(existing or []),
+                )
+                return self.attach_quote_dates(list(existing or []))
 
+        self._pool_rebuild_at = time.monotonic()
         logger.info("→ 触发全市场做 T 标的池全量构建与三重护城河清洗...")
         quote_now = as_shanghai(datetime.now(SHANGHAI))
         trading_days = self.cached_trading_days(quote_now)

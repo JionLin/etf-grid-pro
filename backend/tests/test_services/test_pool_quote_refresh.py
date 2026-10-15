@@ -1,12 +1,19 @@
 """标的池已落库后，首页最新价必须改用实时行情，不能停在建池当日。"""
 import threading
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
-from backend.services.data.akshare_client import AkShareClient
+from backend.services.data.akshare_client import (
+    AkShareClient,
+    POOL_REBUILD_COOLDOWN_SECONDS,
+    eastmoney_circuit_open,
+    reset_eastmoney_circuit,
+)
 
 
 def _stale_pool():
@@ -275,6 +282,63 @@ def test_category_fetch_timeout_falls_back_to_cached_pool():
     assert result[0]["latest_price"] == 1.303
     assert result[0]["quote_date"]
     client.pool_repo.save_pool.assert_not_called()
+
+
+def test_small_pool_does_not_refetch_the_market_on_every_home_load():
+    """不足 20 只时只允许一次全市场重建，冷却期内首页直接读本地。"""
+    client = AkShareClient.__new__(AkShareClient)
+    client.pool_repo = MagicMock()
+    client._pool_rebuild_at = 0.0
+    stored = [{"etf_code": "515220", "latest_price": 1.303, "pct_change": 0.1}]
+    client.pool_repo.get_pool.return_value = stored
+
+    with patch.object(client, "_load_category_spot_rows", return_value=[]) as load:
+        client.build_or_get_etf_pool()
+        cooled = client.build_or_get_etf_pool()
+        client.build_or_get_etf_pool(force_refresh=True)
+
+    assert load.call_count == 2
+    assert cooled[0]["etf_code"] == "515220"
+    client.pool_repo.save_pool.assert_called()
+
+
+def test_pool_rebuild_runs_again_after_the_cooldown():
+    client = AkShareClient.__new__(AkShareClient)
+    client.pool_repo = MagicMock()
+    client.pool_repo.get_pool.return_value = [{"etf_code": "515220", "latest_price": 1.0}]
+    client._pool_rebuild_at = time.monotonic() - POOL_REBUILD_COOLDOWN_SECONDS - 1
+
+    with patch.object(client, "_load_category_spot_rows", return_value=[]) as load:
+        client.build_or_get_etf_pool()
+
+    assert load.call_count == 1
+
+
+def test_eastmoney_failures_open_a_process_circuit_to_tencent():
+    reset_eastmoney_circuit()
+    client = AkShareClient.__new__(AkShareClient)
+    hist_calls = {"count": 0}
+
+    def disconnect(*_args, **_kwargs):
+        hist_calls["count"] += 1
+        raise ConnectionError("eastmoney disconnect")
+
+    fallback = pd.DataFrame({"close": [1.0]})
+    try:
+        with patch("backend.services.data.akshare_client.ak.fund_etf_hist_em", side_effect=disconnect), \
+             patch.object(client, "_get_fallback_kline", return_value=fallback) as tencent, \
+             patch("backend.services.data.akshare_client.ak.fund_etf_spot_em") as spot:
+            for _ in range(3):
+                frame = client._fetch_raw_kline_network("510300", "20200101", "20261014", days=30)
+                assert frame is fallback
+            with pytest.raises(RuntimeError):
+                client._load_spot_frame()
+        assert hist_calls["count"] == 2
+        assert tencent.call_count == 3
+        assert eastmoney_circuit_open()
+        spot.assert_not_called()
+    finally:
+        reset_eastmoney_circuit()
 
 
 def test_quote_date_label_rolls_back_before_open_and_weekend():
