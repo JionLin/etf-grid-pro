@@ -5,7 +5,12 @@ import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
-from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics, pool_rank_score
+from .bar_metrics import (
+    INSUFFICIENT_DATA_LABEL,
+    drop_unfinished_session_bar,
+    measure_local_metrics,
+    pool_rank_score,
+)
 from .trading_calendar import load_trading_year
 from .market_clock import (
     SHANGHAI,
@@ -1529,8 +1534,8 @@ class AkShareClient:
             })
 
         records = self.pct_change_versus_previous_close(records)
-        df = pd.DataFrame(records).reset_index(drop=True)
-        # 幂等全量落盘至本地 SQLite 时序库
+        df = drop_unfinished_session_bar(pd.DataFrame(records).reset_index(drop=True))
+        # 幂等全量落盘至本地 SQLite 时序库。返回值与库内一致，不含收盘前的当天 K 线。
         self.market_repo.save_bars(clean_code, df)
         logger.info(f"✓ {clean_code} 上市以来全生命周期共 {len(df)} 根 K 线成功同步并持久化到本地 SQLite！")
         return df
