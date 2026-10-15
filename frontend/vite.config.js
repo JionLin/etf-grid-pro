@@ -31,8 +31,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
-          router: ['react-router-dom'],
-          utils: ['axios', 'clsx']
+          router: ['react-router-dom']
         }
       }
     },
