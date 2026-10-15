@@ -50,7 +50,7 @@ export default function MethodologyModal({ isOpen, onClose }) {
                   <span>多周期网格回测天梯 · 评测口径与算法说明</span>
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  全市场 537 只成熟做 T 标的统一量化基准与数学推导标准
+                  当前库里成熟做 T 标的的统一量化基准与数学推导标准
                 </p>
               </div>
             </div>
@@ -71,7 +71,7 @@ export default function MethodologyModal({ isOpen, onClose }) {
               <span>统一天梯评测基准（消除横向比较偏见）</span>
             </div>
             <p className="text-xs text-indigo-800 dark:text-indigo-300 leading-relaxed">
-              为了让全市场 537 只做 T 标的在同一尺度下公平竞技，多周期回测天梯大宽表固定采用 <strong>E 大网格 2.0 / 3.0 经典成熟基准</strong>：
+              为了让当前库里的做 T 标的在同一尺度下公平竞技，多周期回测天梯大宽表固定采用 <strong>E 大网格 2.0 / 3.0 经典成熟基准</strong>：
               <strong>初始本金 30,000 元</strong>（50% 底仓 + 50% 现金流动池）、
               <strong>180日动态 ATR 三轨</strong>（小轨 0.6x / 中轨 1.2x / 大轨 2.5x）、
               <strong>倒金字塔加码 10%</strong>（越跌越买以平抑成本）、以及

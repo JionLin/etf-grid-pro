@@ -557,9 +557,12 @@ def get_universe_backtest_matrix():
 
         sectors = matrix_repo.aggregate_sectors(config_key=config_key, is_default_only=(config_key is None))
 
+        from repositories.db_config import storage_label
+
         payload = {
             'updated_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'total_etfs': res['total'],
+            'storage_label': storage_label(),
             'sectors': sectors,
             'records': res['records'],
         }
@@ -567,7 +570,7 @@ def get_universe_backtest_matrix():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"从 MySQL 获取回测矩阵失败: {str(e)}")
-        return jsonify({'success': False, 'error': '从 MySQL 获取回测矩阵失败'}), 500
+        return jsonify({'success': False, 'error': '读取本地回测矩阵失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/sectors-ranking', methods=['GET'])
@@ -582,5 +585,5 @@ def get_sectors_ranking():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"从 MySQL 获取赛道横评失败: {str(e)}")
-        return jsonify({'success': False, 'error': '从 MySQL 获取赛道横评失败'}), 500
+        return jsonify({'success': False, 'error': '读取本地赛道横评失败'}), 500
 

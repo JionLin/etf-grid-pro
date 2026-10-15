@@ -52,9 +52,9 @@ export default function AppFooter() {
           <div>
             <h3 className="font-semibold text-gray-900 mb-4">技术信息</h3>
             <ul className="space-y-2 text-sm text-gray-600">
-              <li>• 数据源：Tushare金融数据</li>
+              <li>• 数据源：腾讯财经 / 东方财富</li>
               <li>• 算法：ATR + ADX + 统计分析</li>
-              <li>• 更新频率：每日收盘后</li>
+              <li>• 更新频率：盘中看行情，日 K 在收盘后增量</li>
               <li>• 版本：{version}</li>
             </ul>
           </div>

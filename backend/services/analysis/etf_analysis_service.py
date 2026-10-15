@@ -153,7 +153,17 @@ class ETFAnalysisService:
             ),
             "items": items,
             "backfilling": self._pool_backfilling(len(items)),
+            "storage_label": self._storage_label(),
         }
+
+    @staticmethod
+    def _storage_label() -> str:
+        try:
+            from repositories.db_config import storage_label
+
+            return storage_label()
+        except Exception:
+            return "本地数据库"
 
     def _pool_backfilling(self, item_count: int) -> bool:
         try:

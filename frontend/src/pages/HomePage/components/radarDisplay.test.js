@@ -10,6 +10,7 @@ import {
   aggregateSectorCounts,
   maturityCounts,
   backfillHint,
+  storageBadge,
 } from "./radarDisplay.js";
 
 test("default collapse limit is 6 items", () => {
@@ -48,6 +49,12 @@ test("subsector counts come from the catalog, including zeros", () => {
     subsectorsForSector(summary, "医药健康").map((item) => item.count),
     [1, 0]
   );
+});
+
+test("storage badge follows the configured database", () => {
+  assert.equal(storageBadge("本机 SQLite"), "本机 SQLite 直出");
+  assert.equal(storageBadge("本机 MySQL"), "本机 MySQL 直出");
+  assert.equal(storageBadge(undefined), "本地数据库直出");
 });
 
 test("maturity badges stay at zero while the pool is empty", () => {

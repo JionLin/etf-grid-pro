@@ -17,6 +17,7 @@ import {
   aggregateSectorCounts,
   maturityCounts,
   backfillHint,
+  storageBadge,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -300,7 +301,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
               全市场做 T 核心 ETF 选品雷达
             </h2>
             <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs px-2.5 py-1 rounded-full font-bold border border-emerald-200 dark:border-emerald-800">
-              本机 MySQL 直出
+              {storageBadge(poolData.storage_label)}
             </span>
             <Link
               to="/grid-fit"

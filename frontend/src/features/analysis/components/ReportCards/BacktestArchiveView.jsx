@@ -365,13 +365,16 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
               历史网格回测档案库
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              537 只成熟标的 5 年日线纯本地直出，包含多周期矩阵对比、11 大赛道胜率横评及历史快照
+              {matrixData.total_etfs ?? filteredMatrixRecords.length} 只成熟标的的日线在本地库直出，包含多周期矩阵对比、11 大赛道胜率横评及历史快照
             </p>
           </div>
         ) : (
           <div className="text-xs text-gray-500 flex items-center gap-2">
             <Award className="w-4 h-4 text-indigo-600" />
-            <span>全市场 537 标的多周期长跑回测大宽表 (纯本地 MySQL 毫秒直出)</span>
+            <span>
+              {matrixData.total_etfs ?? filteredMatrixRecords.length} 只标的多周期长跑回测大宽表
+              （{matrixData.storage_label || "本地数据库"}直出）
+            </span>
           </div>
         )}
 

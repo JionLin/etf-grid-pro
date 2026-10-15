@@ -20,6 +20,11 @@ def db_type() -> str:
     raise ValueError("DB_TYPE 只能是 sqlite 或 mysql")
 
 
+def storage_label() -> str:
+    """页面上显示的库类型。"""
+    return "本机 SQLite" if db_type() == "sqlite" else "本机 MySQL"
+
+
 def is_sqlite() -> bool:
     return db_type() == "sqlite"
 

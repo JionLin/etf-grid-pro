@@ -52,6 +52,13 @@ export function maturityCounts(items) {
   };
 }
 
+export function storageBadge(label) {
+  if (label === "本机 SQLite" || label === "本机 MySQL") {
+    return `${label} 直出`;
+  }
+  return "本地数据库直出";
+}
+
 export function backfillHint(backfilling, count) {
   if (backfilling && !count) {
     return "正在回补日K，完成后会自动出现标的";
