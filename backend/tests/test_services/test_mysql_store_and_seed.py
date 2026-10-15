@@ -29,6 +29,9 @@ class TestMysqlStoreAndSeed(unittest.TestCase):
         reset_business_tables(TEST_DATABASE)
 
     def test_wrong_password_does_not_create_sqlite(self):
+        from backend.repositories.db_config import db_type
+        if db_type() != "mysql":
+            self.skipTest("错误密码不会另建文件，只在 MySQL 后端检查")
         data_dir = Path(__file__).resolve().parents[2] / "data"
         before = set(data_dir.glob("*.db"))
         with self.assertRaises(MysqlConnectionError):
@@ -39,9 +42,10 @@ class TestMysqlStoreAndSeed(unittest.TestCase):
         bars = show_create_table(TEST_DATABASE, "etf_daily_bar")
         payload = show_create_table(TEST_DATABASE, "backtest_run_payload")
         run = show_create_table(TEST_DATABASE, "backtest_run")
-        self.assertIn("double", bars.lower())
-        compact = bars.replace(" ", "").replace("`", "")
-        self.assertIn("PRIMARYKEY(etf_code,trade_date)", compact)
+        lowered = bars.lower()
+        self.assertTrue("double" in lowered or "real" in lowered)
+        compact = lowered.replace(" ", "").replace("`", "").replace("\n", "")
+        self.assertIn("primarykey(etf_code,trade_date)", compact)
         self.assertIn("run_id", payload)
         self.assertNotIn("equity_curve", run)
 

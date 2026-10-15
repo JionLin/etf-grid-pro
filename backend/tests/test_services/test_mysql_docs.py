@@ -5,15 +5,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_readme_does_not_call_sqlite_the_store():
+def test_readme_documents_sqlite_default_and_mysql_switch():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "SQLite3" not in readme
-    assert "本地 SQLite" not in readme
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "DB_TYPE" in readme
+    assert "SQLITE_PATH" in example
+    assert "DB_TYPE=sqlite" in example
     assert "MYSQL_PASSWORD" in readme
-    assert "不会回退到 SQLite" in readme
+    assert "不会改回 SQLite" in readme
 
 
 def test_compose_passes_mysql_settings():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    for key in ("MYSQL_HOST", "MYSQL_PORT", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE"):
+    for key in ("DB_TYPE", "SQLITE_PATH", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE"):
         assert key in compose

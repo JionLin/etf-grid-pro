@@ -2,14 +2,14 @@
 import logging
 from typing import Optional
 
-import pymysql
-
+from .db_config import is_sqlite
 from .mysql_connection import (
     DEFAULT_DATABASE,
     TEST_DATABASE,
     connect,
     connect_server,
 )
+from .sqlite_dialect import adapt_ddl
 
 logger = logging.getLogger(__name__)
 
@@ -388,16 +388,17 @@ def ensure_database(name: str) -> None:
     """建库并建表。库名只允许本项目的两个固定库。"""
     if name not in (DEFAULT_DATABASE, TEST_DATABASE):
         raise ValueError(f"拒绝创建未登记的库: {name}")
-    server = connect_server()
-    try:
-        with server.cursor() as cursor:
-            cursor.execute(
-                f"CREATE DATABASE IF NOT EXISTS `{name}` "
-                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-            )
-        server.commit()
-    finally:
-        server.close()
+    if not is_sqlite():
+        server = connect_server()
+        try:
+            with server.cursor() as cursor:
+                cursor.execute(
+                    f"CREATE DATABASE IF NOT EXISTS `{name}` "
+                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                )
+            server.commit()
+        finally:
+            server.close()
     ensure_tables(name)
 
 
@@ -406,14 +407,22 @@ def ensure_tables(database: Optional[str] = None) -> None:
     try:
         with conn.cursor() as cursor:
             for statement in _STATEMENTS:
-                cursor.execute(statement)
+                if is_sqlite():
+                    create_sql, indexes = adapt_ddl(statement)
+                    cursor.execute(create_sql)
+                    for index_sql in indexes:
+                        cursor.execute(index_sql)
+                else:
+                    cursor.execute(statement)
         conn.commit()
     finally:
         conn.close()
 
 
 def apply_table_comments(database: Optional[str] = None) -> None:
-    """给已存在的表补上表备注和列备注。不改数据，可重复执行。"""
+    """给已存在的 MySQL 表补上表备注和列备注。不改数据，可重复执行。"""
+    if is_sqlite():
+        return
     target = database or DEFAULT_DATABASE
     if target not in (DEFAULT_DATABASE, TEST_DATABASE):
         raise ValueError(f"拒绝修改未登记的库: {target}")
@@ -435,10 +444,14 @@ def reset_business_tables(database: str) -> None:
     conn = connect(database)
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
-            for table in BUSINESS_TABLES:
-                cursor.execute(f"TRUNCATE TABLE {table}")
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+            if is_sqlite():
+                for table in BUSINESS_TABLES:
+                    cursor.execute(f"DELETE FROM {table}")
+            else:
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+                for table in BUSINESS_TABLES:
+                    cursor.execute(f"TRUNCATE TABLE {table}")
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
         conn.commit()
     finally:
         conn.close()
@@ -448,6 +461,13 @@ def show_create_table(database: str, table: str) -> str:
     conn = connect(database)
     try:
         with conn.cursor() as cursor:
+            if is_sqlite():
+                cursor.execute(
+                    "SELECT sql AS create_sql FROM sqlite_master WHERE type = 'table' AND name = %s",
+                    (table,),
+                )
+                row = cursor.fetchone()
+                return row["create_sql"] if row else ""
             cursor.execute(f"SHOW CREATE TABLE `{table}`")
             row = cursor.fetchone()
             return row["Create Table"]

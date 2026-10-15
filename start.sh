@@ -11,7 +11,7 @@ if [ ! -f ".env" ]; then
     echo "=================================="
     echo "💡 快速初始化指南："
     echo "  1. 复制配置文件模板:  cp .env.example .env"
-    echo "  2. 编辑 .env 文件填入你的 Tushare Token (免费注册获取: https://tushare.pro/register)"
+    echo "  2. 编辑 .env。默认 SQLite，无需 MySQL。Tushare Token 免费注册: https://tushare.pro/register"
     echo "=================================="
     exit 1
 fi
@@ -48,6 +48,8 @@ cleanup() {
 }
 
 trap cleanup INT TERM
+
+echo "数据库默认 SQLite（data/etf_grid.sqlite）。改用 MySQL 时在 .env 设置 DB_TYPE=mysql 并填写 MYSQL_*。"
 
 # 1. 检查后端服务 (端口 5001)
 if check_port 5001; then

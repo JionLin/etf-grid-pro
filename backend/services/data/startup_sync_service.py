@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from repositories.market_data_repository import MarketDataRepository
+from repositories.db_config import db_type, sqlite_path
 from repositories.mysql_connection import DEFAULT_DATABASE, connect
 from repositories.universe_matrix_repository import UniverseMatrixRepository
 from services.analysis.universe_matrix_backtest_service import UniverseMatrixBacktestService
@@ -128,7 +129,9 @@ class StartupSyncService:
         }
 
     def acquire_distributed_lock(self, conn) -> bool:
-        """尝试获取 MySQL 命名互斥锁，等待 0 秒立即返回。"""
+        """MySQL 用 GET_LOCK。SQLite 用数据库文件旁的进程锁。"""
+        if db_type() == "sqlite":
+            return self._acquire_sqlite_lock()
         try:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT GET_LOCK('{LOCK_NAME}', 0) AS locked")
@@ -142,12 +145,43 @@ class StartupSyncService:
             return False
 
     def release_distributed_lock(self, conn) -> None:
-        """释放 MySQL 命名互斥锁。"""
+        """释放同步锁。"""
+        if db_type() == "sqlite":
+            self._release_sqlite_lock()
+            return
         try:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT RELEASE_LOCK('{LOCK_NAME}')")
         except Exception as e:
             logger.warning("释放 MySQL 分布式锁异常: %s", e)
+
+    def _acquire_sqlite_lock(self) -> bool:
+        import fcntl
+
+        path = sqlite_path(DEFAULT_DATABASE).with_suffix(".lock")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(path, "a", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.close()
+            return False
+        self._sqlite_lock_handle = handle
+        return True
+
+    def _release_sqlite_lock(self) -> None:
+        import fcntl
+
+        handle = getattr(self, "_sqlite_lock_handle", None)
+        if handle is None:
+            return
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+        except Exception as exc:
+            logger.warning("释放 SQLite 文件锁异常: %s", exc)
+        finally:
+            self._sqlite_lock_handle = None
 
     def run_sync_pipeline(self, workers: int = 5, force: bool = False) -> Dict[str, Any]:
         """执行完整的自检、增量日 K 线同步与回测矩阵级联刷新管道。"""

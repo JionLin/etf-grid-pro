@@ -35,9 +35,11 @@ def test_settlement_date_calculation():
     assert service.calculate_expected_settled_date(mon_morning) == "2026-09-11"
 
 
-def test_distributed_lock_acquisition():
+def test_distributed_lock_acquisition(monkeypatch):
     """测试 MySQL GET_LOCK 锁获取与释放"""
+    monkeypatch.setenv("DB_TYPE", "sqlite")
     service = StartupSyncService()
+    monkeypatch.setenv("DB_TYPE", "mysql")
 
     # 模拟获取锁成功
     mock_conn = MagicMock()

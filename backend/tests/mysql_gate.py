@@ -5,12 +5,18 @@ import pytest
 
 
 def mysql_skip_reason() -> str:
-    """返回跳过原因。配置齐全且能连上测试库时返回空字符串。"""
+    """SQLite 不跳过。只有选了 MySQL 又连不上时才跳过。"""
+    from backend.repositories.db_config import db_type
+
+    if db_type() != "mysql":
+        return ""
     if not os.environ.get("MYSQL_USER") or "MYSQL_PASSWORD" not in os.environ:
         return "未配置 MYSQL_USER / MYSQL_PASSWORD"
     try:
         from backend.repositories.mysql_connection import TEST_DATABASE, connect
+        from backend.repositories.mysql_schema import ensure_database
 
+        ensure_database(TEST_DATABASE)
         connection = connect(TEST_DATABASE)
         connection.close()
     except Exception:

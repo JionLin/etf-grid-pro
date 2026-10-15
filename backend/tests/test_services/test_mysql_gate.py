@@ -3,6 +3,7 @@ from backend.tests.mysql_gate import mysql_skip_reason
 
 
 def test_missing_account_does_not_open_a_connection(monkeypatch):
+    monkeypatch.setenv("DB_TYPE", "mysql")
     monkeypatch.delenv("MYSQL_USER", raising=False)
     monkeypatch.delenv("MYSQL_PASSWORD", raising=False)
 
