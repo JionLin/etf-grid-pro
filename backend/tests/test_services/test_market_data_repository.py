@@ -1,4 +1,7 @@
 import unittest
+from datetime import datetime
+from unittest.mock import patch
+
 import pandas as pd
 from backend.repositories.market_data_repository import MarketDataRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
@@ -72,6 +75,19 @@ class TestMarketDataRepository(unittest.TestCase):
         self.assertEqual(date_range["min_date"], "2024-01-02")
         self.assertEqual(date_range["max_date"], "2024-06-15")
         self.assertEqual(date_range["total_count"], 2)
+
+    def test_save_skips_unfinished_session_bar(self):
+        """收盘前的当天日 K 不入库。"""
+        noon = datetime(2026, 10, 15, 11, 0)
+        with patch("services.data.market_clock.shanghai_now", return_value=noon):
+            saved = self.repo.save_bars("515220", [
+                {"trade_date": "2026-10-14", "open": 1.0, "close": 1.30, "amount": 100.0},
+                {"trade_date": "2026-10-15", "open": 1.3, "close": 1.10, "amount": 9_000_000.0},
+            ])
+        self.assertEqual(saved, 1)
+        df = self.repo.get_bars("515220")
+        self.assertEqual(len(df), 1)
+        self.assertEqual(df.iloc[0]["trade_date"].strftime("%Y-%m-%d"), "2026-10-14")
 
 
 if __name__ == "__main__":

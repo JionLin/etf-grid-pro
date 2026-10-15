@@ -1,5 +1,6 @@
 """用本地日 K 计算 14 日 ATR 和 20 日均成交额。不够长就标数据不足。"""
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, Iterable, Optional
 
 import pandas as pd
 
@@ -7,6 +8,11 @@ try:
     from algorithms.atr.calculator import ATRCalculator
 except ImportError:
     from backend.algorithms.atr.calculator import ATRCalculator
+
+try:
+    from services.data.market_clock import session_bar_unfinished
+except ImportError:
+    from backend.services.data.market_clock import session_bar_unfinished
 
 
 INSUFFICIENT_DATA_LABEL = "数据不足"
@@ -31,7 +37,39 @@ def elasticity_from_atr(atr_pct: float) -> str:
     return "低波防守"
 
 
-def measure_local_metrics(frame: Optional[pd.DataFrame]) -> Dict[str, Any]:
+def _date_column(frame: pd.DataFrame) -> Optional[str]:
+    if "trade_date" in frame.columns:
+        return "trade_date"
+    if "date" in frame.columns:
+        return "date"
+    return None
+
+
+def drop_unfinished_session_bar(
+    frame: Optional[pd.DataFrame],
+    moment: Optional[datetime] = None,
+    trading_days: Optional[Iterable[str]] = None,
+) -> Optional[pd.DataFrame]:
+    """收盘前丢掉今天这根未完成日 K。历史交易日原样保留。"""
+    if frame is None or frame.empty:
+        return frame
+    column = _date_column(frame)
+    if column is None:
+        return frame
+    keep = [
+        not session_bar_unfinished(value, moment, trading_days)
+        for value in frame[column].tolist()
+    ]
+    if all(keep):
+        return frame
+    return frame.loc[keep].reset_index(drop=True)
+
+
+def measure_local_metrics(
+    frame: Optional[pd.DataFrame],
+    moment: Optional[datetime] = None,
+    trading_days: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
     """从本地日 K 读取 ATR 和 20 日均成交额。样本不够时不编造数值。
 
     Args:
@@ -51,7 +89,10 @@ def measure_local_metrics(frame: Optional[pd.DataFrame]) -> Dict[str, Any]:
     if frame is None or frame.empty:
         return empty
 
-    bars = frame.copy()
+    bars = drop_unfinished_session_bar(frame, moment, trading_days)
+    if bars is None or bars.empty:
+        return empty
+    bars = bars.copy()
     if "date" not in bars.columns and "trade_date" in bars.columns:
         bars = bars.rename(columns={"trade_date": "date"})
     empty["bar_count"] = len(bars)

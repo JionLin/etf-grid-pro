@@ -28,6 +28,24 @@ def is_market_closed(moment: Optional[datetime] = None, close_hm: str = MARKET_C
     return as_shanghai(moment).strftime("%H:%M") >= close_hm
 
 
+def session_bar_unfinished(
+    trade_date: object,
+    moment: Optional[datetime] = None,
+    trading_days: Optional[Iterable[str]] = None,
+) -> bool:
+    """交易日收盘前，当天这根日 K 还没收完，不能写入日线表或参与 ATR。"""
+    now = as_shanghai(moment) if moment is not None else shanghai_now()
+    if not is_trading_day(now, trading_days):
+        return False
+    if now.strftime("%H:%M") >= MARKET_CLOSE:
+        return False
+    if hasattr(trade_date, "strftime"):
+        label = trade_date.strftime("%Y-%m-%d")
+    else:
+        label = str(trade_date)[:10]
+    return label == now.strftime("%Y-%m-%d")
+
+
 def in_continuous_session(
     moment: Optional[datetime] = None,
     trading_days: Optional[Iterable[str]] = None,

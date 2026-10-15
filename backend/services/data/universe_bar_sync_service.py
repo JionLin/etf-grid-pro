@@ -9,6 +9,7 @@ import pandas as pd
 from repositories.etf_pool_repository import ETFPoolRepository
 from repositories.market_data_repository import MarketDataRepository
 from services.data.akshare_client import AkShareClient
+from services.data.bar_metrics import drop_unfinished_session_bar
 from services.data.market_clock import SHANGHAI, as_shanghai
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,8 @@ class UniverseBarSyncService:
                     end_date=target_end,
                 )
 
+                if df is not None and not df.empty:
+                    df = drop_unfinished_session_bar(df)
                 if df is not None and not df.empty:
                     saved = self.market_repo.save_bars(clean_code, df)
                     updated_stat = self.market_repo.get_date_range(clean_code)

@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
+from services.data.market_clock import session_bar_unfinished
 from .mysql_connection import DEFAULT_DATABASE, connect
 from .mysql_schema import ensure_database
 
@@ -44,7 +45,10 @@ class MarketDataRepository:
         return text
 
     def save_bars(self, etf_code: str, bars: Union[pd.DataFrame, List[Dict[str, Any]]]) -> int:
-        records = self._to_records(etf_code, bars)
+        records = [
+            row for row in self._to_records(etf_code, bars)
+            if not self._session_bar_unfinished(row[1])
+        ]
         if not records:
             return 0
         try:
@@ -59,6 +63,10 @@ class MarketDataRepository:
         except Exception as exc:
             logger.error("批量保存日 K 失败 (%s): %s", etf_code, exc)
             return 0
+
+    @staticmethod
+    def _session_bar_unfinished(trade_date: str) -> bool:
+        return session_bar_unfinished(trade_date)
 
     def _to_records(self, etf_code: str, bars: Union[pd.DataFrame, List[Dict[str, Any]]]) -> List[tuple]:
         if bars is None:

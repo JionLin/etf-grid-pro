@@ -1,9 +1,13 @@
 """本地日 K 不够时不能再用名称波幅或当日成交额冒充 ATR 和月均成交。"""
+from datetime import datetime
+from unittest.mock import MagicMock
+
 import pandas as pd
 
 from backend.services.data.akshare_client import AkShareClient
 from backend.services.data.bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
 from backend.services.data.t0_rules import is_t0_instrument
+from backend.services.data.universe_bar_sync_service import UniverseBarSyncService
 
 
 def _bars(count: int, amount: float = 50_000_000.0) -> pd.DataFrame:
@@ -25,6 +29,60 @@ def test_twenty_bars_use_real_atr_and_average_turnover():
     assert metrics["atr_pct"] > 0
     assert metrics["elasticity"] != INSUFFICIENT_DATA_LABEL
     assert metrics["amount_ma20_10k"] == 8000.0
+
+
+def test_unfinished_today_bar_is_excluded_from_atr_and_turnover():
+    dates = pd.date_range("2026-09-15", periods=21, freq="B")
+    amounts = [80_000_000.0] * 20 + [8_000_000_000.0]
+    frame = pd.DataFrame({
+        "date": dates,
+        "open": [1.0] * 21,
+        "high": [1.02] * 21,
+        "low": [0.98] * 21,
+        "close": [1.0] * 21,
+        "amount": amounts,
+    })
+    before_close = datetime(2026, 10, 13, 11, 30)
+    assert dates[-1].strftime("%Y-%m-%d") == "2026-10-13"
+    metrics = measure_local_metrics(frame, moment=before_close)
+    assert metrics["bar_count"] == 20
+    assert metrics["amount_ma20_10k"] == 8000.0
+    after_close = measure_local_metrics(frame, moment=datetime(2026, 10, 13, 15, 0))
+    assert after_close["bar_count"] == 21
+    assert after_close["amount_ma20_10k"] != 8000.0
+
+
+def test_sync_does_not_store_today_before_close(monkeypatch):
+    from backend.services.data import market_clock
+
+    monkeypatch.setattr(
+        market_clock,
+        "shanghai_now",
+        lambda: datetime(2026, 10, 15, 11, 0, tzinfo=market_clock.SHANGHAI),
+    )
+    frame = pd.DataFrame({
+        "trade_date": [pd.Timestamp("2026-10-14"), pd.Timestamp("2026-10-15")],
+        "open": [1.0, 1.0],
+        "close": [1.1, 1.05],
+        "high": [1.2, 1.1],
+        "low": [1.0, 0.9],
+        "vol": [100.0, 100.0],
+        "amount": [1_000_000.0, 9_000_000_000.0],
+    })
+    client = MagicMock()
+    client._get_fallback_kline.return_value = frame
+    market_repo = MagicMock()
+    market_repo.get_date_range.return_value = {
+        "total_count": 0,
+        "min_date": None,
+        "max_date": None,
+    }
+    market_repo.save_bars.side_effect = lambda code, bars: len(bars)
+    service = UniverseBarSyncService(market_repo=market_repo, pool_repo=MagicMock(), client=client)
+    result = service.sync_single_etf("510300", start_date="2026-10-01", end_date="2026-10-15")
+    saved = market_repo.save_bars.call_args.args[1]
+    assert list(pd.to_datetime(saved["trade_date"]).dt.strftime("%Y-%m-%d")) == ["2026-10-14"]
+    assert result["status"] == "synced"
 
 
 def test_short_history_is_marked_insufficient():
