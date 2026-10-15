@@ -1,7 +1,7 @@
 """本地网格账本。SQLite 与 MySQL 共用这些语句。"""
 from typing import Any, Dict, List, Optional
 
-from services.analysis.order_ledger import may_fill_today, normalize_side, normalize_status, order_key
+from services.analysis.order_ledger import initial_status, may_fill_today, normalize_side, normalize_status, order_key
 from services.data.market_clock import shanghai_now
 
 from .mysql_connection import DEFAULT_DATABASE, connect
@@ -59,6 +59,8 @@ class LedgerRepository:
                     price = round(float(order.get("trigger_price", order.get("price"))), 3)
                     shares = int(order.get("shares") or 0)
                     note = str(order.get("note") or "")[:255]
+                    rail = str(order.get("rail") or "")
+                    role = str(order.get("role") or "")
                     if shares <= 0 or price <= 0:
                         continue
                     match = None
@@ -81,7 +83,7 @@ class LedgerRepository:
                                 (plan_id, side, trigger_price, shares, note, status, updated_at)
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
                             """,
-                            (plan_id, side, price, shares, note, "未挂", now),
+                            (plan_id, side, price, shares, note, initial_status(note, rail, role), now),
                         )
                         used.add(cursor.lastrowid)
                 for row in existing:
@@ -135,7 +137,11 @@ class LedgerRepository:
                     item = dict(row)
                     item["trigger_price"] = round(float(item["trigger_price"]), 3)
                     item["may_fill_today"] = may_fill_today(
-                        item["side"], item["trigger_price"], current_price, item["status"]
+                        item["side"],
+                        item["trigger_price"],
+                        current_price,
+                        item["status"],
+                        note=item.get("note") or "",
                     )
                     orders.append(item)
         finally:

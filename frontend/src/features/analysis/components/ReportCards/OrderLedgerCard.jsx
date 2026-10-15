@@ -1,7 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { brokerOrderRecords } from "./brokerOrderSheet";
 
-const STATUSES = ["未挂", "已挂", "已成", "作废"];
+const GRID_STATUSES = ["未挂", "已挂", "已成", "作废"];
+const BASE_STATUSES = ["待买入", "已成", "作废"];
+
+function statusChoices(order) {
+  if (order?.status === "待买入" || String(order?.note || "").startsWith("底仓")) {
+    return BASE_STATUSES;
+  }
+  return GRID_STATUSES;
+}
 
 export default function OrderLedgerCard({
   etfCode,
@@ -114,7 +122,7 @@ export default function OrderLedgerCard({
                       onChange={(event) => mark(order.id, event.target.value)}
                       className="bg-white border border-slate-200 rounded px-1 py-0.5"
                     >
-                      {STATUSES.map((status) => (
+                      {statusChoices(order).map((status) => (
                         <option key={status} value={status}>{status}</option>
                       ))}
                     </select>
