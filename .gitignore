@@ -215,6 +215,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# 运行日志按大小轮转，不入库。
+logs/
+
 # 本地行情库与 WAL。运行时生成，不入库。
 *.db
 *.db-wal

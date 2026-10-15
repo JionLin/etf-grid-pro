@@ -56,6 +56,16 @@ def create_app():
     # 注册路由
     register_routes(app)
     
+    # 启动前备份 SQLite。测试进程不写备份，避免污染临时库。
+    if FLASK_ENV != 'testing' and not os.environ.get('PYTEST_CURRENT_TEST'):
+        try:
+            from services.data.sqlite_backup import backup_sqlite_database
+            backup_path = backup_sqlite_database()
+            if backup_path is not None:
+                app.logger.info(f"SQLite 已备份到 {backup_path}")
+        except Exception as ex:
+            app.logger.warning(f"SQLite 启动备份失败 (非阻塞): {ex}")
+
     # 启动后台数据新鲜度自检与增量自愈守护线程 (测试环境除外)
     if FLASK_ENV != 'testing' and not os.environ.get('PYTEST_CURRENT_TEST'):
         try:
