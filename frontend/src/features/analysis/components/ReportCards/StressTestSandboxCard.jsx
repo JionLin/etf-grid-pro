@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -18,6 +18,7 @@ import {
   calculateRallyScenario,
   RALLY_TEST_PRESETS,
   deepestGridDropLabel,
+  defaultStressDrop,
 } from "@shared/utils/stressTestCalculator";
 
 /**
@@ -32,8 +33,16 @@ const StressTestSandboxCard = ({
   // 方向切换: "down" 下跌防穿透 | "up" 上涨防踏空
   const [direction, setDirection] = useState("down");
 
-  // 当前推演跌幅百分比 (默认 20%)
-  const [dropPct, setDropPct] = useState(20);
+  const [dropTouched, setDropTouched] = useState(false);
+  const [dropPct, setDropPct] = useState(10);
+  useEffect(() => {
+    if (dropTouched) return;
+    setDropPct(defaultStressDrop(currentPrice, compositeGrid?.merged_ladder));
+  }, [dropTouched, currentPrice, compositeGrid]);
+  const chooseDrop = (value) => {
+    setDropTouched(true);
+    setDropPct(value);
+  };
 
   // 当前推演涨幅百分比 (默认 20%)
   const [rallyPct, setRallyPct] = useState(20);
@@ -194,7 +203,7 @@ const StressTestSandboxCard = ({
               <button
                 key={p.drop}
                 type="button"
-                onClick={() => setDropPct(p.drop)}
+                onClick={() => chooseDrop(p.drop)}
                 title={p.desc}
                 className={`py-2 px-2.5 rounded-xl text-xs font-medium transition-all text-center flex flex-col items-center justify-center gap-0.5 border ${
                   isSelected
@@ -230,7 +239,7 @@ const StressTestSandboxCard = ({
             max="60"
             step="1"
             value={dropPct}
-            onChange={(e) => setDropPct(Number(e.target.value))}
+            onChange={(e) => chooseDrop(Number(e.target.value))}
             className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900 transition-all"
           />
         </div>

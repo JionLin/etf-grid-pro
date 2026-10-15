@@ -358,6 +358,20 @@ export const STRESS_TEST_PRESETS = [
 /**
  * 5 大经典上涨情景预设配置
  */
+export function defaultStressDrop(currentPrice, ladder) {
+  const price = Number(currentPrice);
+  const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0);
+  if (!price || buys.length === 0) {
+    return 10;
+  }
+  const deepest = buys.reduce((min, item) => (Number(item.price) < Number(min.price) ? item : min));
+  const drop = ((price - Number(deepest.price)) / price) * 100;
+  if (!(drop > 0)) {
+    return 10;
+  }
+  return Math.max(1, Math.min(60, Math.round(drop)));
+}
+
 export function deepestGridDropLabel(currentPrice, ladder) {
   const price = Number(currentPrice);
   const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0);

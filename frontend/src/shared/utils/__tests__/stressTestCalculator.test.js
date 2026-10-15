@@ -3,6 +3,7 @@ import {
   calculateRallyScenario,
   calculateStressTestScenario,
   deepestGridDropLabel,
+  defaultStressDrop,
 } from "../stressTestCalculator.js";
 
 function assert(condition, message) {
@@ -42,5 +43,7 @@ assert(
   "最深买单应显示为相对现价的跌幅"
 );
 assert(deepestGridDropLabel(10, []) === "", "没有买单时不显示最深网格");
+assert(defaultStressDrop(10, grid.merged_ladder) === 30, "默认跌幅应落到当前最深买单");
+assert(defaultStressDrop(10, []) === 10, "没有买单时默认跌幅为 -10%");
 
 console.log("stressTestCalculator 测试通过");
