@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .market_clock import SHANGHAI, as_shanghai
 from .trading_calendar import load_trading_year
@@ -9,6 +10,18 @@ from typing import Any, Optional, Dict, List
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_akshare_cache_dir(explicit: Optional[str] = None) -> str:
+    """缓存目录相对仓库根目录，不跟当前工作目录走。可用 AKSHARE_CACHE_DIR 覆盖。"""
+    repo_root = Path(__file__).resolve().parents[3]
+    raw = explicit if explicit else os.environ.get("AKSHARE_CACHE_DIR")
+    if not raw:
+        return str(repo_root / "cache" / "akshare")
+    path = Path(raw)
+    if not path.is_absolute():
+        path = repo_root / path
+    return str(path)
 
 
 class EnhancedCache:

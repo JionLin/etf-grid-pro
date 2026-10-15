@@ -1,7 +1,10 @@
+import os
 import unittest
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pandas as pd
+from backend.services.data.cache_service import resolve_akshare_cache_dir
 from backend.services.data.akshare_client import AkShareClient
 from backend.repositories.market_data_repository import MarketDataRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
@@ -244,6 +247,25 @@ class TestAKShareClientFallbackPagination(unittest.TestCase):
         self.assertEqual(during["current_price"], 1.303)
         self.assertEqual(before_open["trade_date"], "20261014")
         self.assertEqual(before_open["timestamp"], "2026-10-15 09:00:00")
+
+
+def test_akshare_cache_dir_is_under_repo_root(monkeypatch, tmp_path):
+    """从仓库根目录启动时，不能再去写上一级的 ../cache。"""
+    monkeypatch.delenv("AKSHARE_CACHE_DIR", raising=False)
+    previous = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        resolved = Path(resolve_akshare_cache_dir())
+        client = AkShareClient()
+    finally:
+        os.chdir(previous)
+    assert resolved.parts[-2:] == ("cache", "akshare")
+    assert resolved.is_absolute()
+    assert Path(client.cache.cache_dir) == resolved
+    monkeypatch.setenv("AKSHARE_CACHE_DIR", "custom-cache/akshare")
+    custom = Path(resolve_akshare_cache_dir())
+    assert custom.parts[-2:] == ("custom-cache", "akshare")
+    assert custom.is_absolute()
 
 
 if __name__ == "__main__":

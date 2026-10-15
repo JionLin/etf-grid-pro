@@ -15,7 +15,7 @@ from .market_clock import (
     spot_quote_unusable,
 )
 from .t0_rules import is_t0_instrument
-from .cache_service import EnhancedCache
+from .cache_service import EnhancedCache, resolve_akshare_cache_dir
 try:
     from repositories.market_data_repository import MarketDataRepository
     from repositories.etf_pool_repository import ETFPoolRepository, UNCLASSIFIED_SECTOR
@@ -51,10 +51,10 @@ _SINA_CATEGORY_COLUMNS = [
 class AkShareClient:
     """AkShare数据客户端 - 与TushareClient接口完全兼容"""
     
-    def __init__(self, cache_dir: str = "../cache/akshare"):
+    def __init__(self, cache_dir: Optional[str] = None):
         """初始化AkShare客户端"""
         # 初始化缓存管理器（保持与TushareClient相同的逻辑）
-        self.cache = EnhancedCache(cache_dir)
+        self.cache = EnhancedCache(resolve_akshare_cache_dir(cache_dir))
         self.market_repo = MarketDataRepository()
         self.pool_repo = ETFPoolRepository()
         
