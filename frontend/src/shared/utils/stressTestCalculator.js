@@ -358,18 +358,44 @@ export const STRESS_TEST_PRESETS = [
 /**
  * 5 大经典上涨情景预设配置
  */
-export function defaultStressDrop(currentPrice, ladder) {
+function roundedDrop(currentPrice, orderPrice) {
+  const price = Number(currentPrice);
+  const level = Number(orderPrice);
+  if (!price || !(level > 0) || !(price > level)) return null;
+  const drop = ((price - level) / price) * 100;
+  if (!(drop > 0)) return null;
+  return Math.max(1, Math.min(60, Math.round(drop)));
+}
+
+export function deepestStressDrop(currentPrice, ladder) {
   const price = Number(currentPrice);
   const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0);
-  if (!price || buys.length === 0) {
-    return 10;
-  }
+  if (!price || buys.length === 0) return null;
   const deepest = buys.reduce((min, item) => (Number(item.price) < Number(min.price) ? item : min));
-  const drop = ((price - Number(deepest.price)) / price) * 100;
-  if (!(drop > 0)) {
-    return 10;
+  return roundedDrop(price, deepest.price);
+}
+
+export function defaultStressDrop(currentPrice, ladder) {
+  const price = Number(currentPrice);
+  const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0 && Number(item.price) < price);
+  if (!price || buys.length === 0) return 10;
+  const nearest = buys.reduce((max, item) => (Number(item.price) > Number(max.price) ? item : max));
+  return roundedDrop(price, nearest.price) ?? 10;
+}
+
+export function stressCashNote(result) {
+  if (!result) return "";
+  const drained = result.safetyLevel === "exhausted" || result.stoppedByCash;
+  if (drained && result.exhaustionDropPct != null) {
+    return `子弹耗尽临界: -${result.exhaustionDropPct}%`;
   }
-  return Math.max(1, Math.min(60, Math.round(drop)));
+  if (result.safetyLevel === "danger" || result.safetyLevel === "warning" || result.safetyLevel === "exhausted") {
+    return `现金尚未耗尽，已消耗 ${result.cashDrainRatio}%`;
+  }
+  if (result.exhaustionDropPct != null) {
+    return `子弹耗尽临界: -${result.exhaustionDropPct}%`;
+  }
+  return "按当前网格买完，现金仍有余";
 }
 
 export function deepestGridDropLabel(currentPrice, ladder) {

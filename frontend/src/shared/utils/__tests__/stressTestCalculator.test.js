@@ -3,7 +3,9 @@ import {
   calculateRallyScenario,
   calculateStressTestScenario,
   deepestGridDropLabel,
+  deepestStressDrop,
   defaultStressDrop,
+  stressCashNote,
 } from "../stressTestCalculator.js";
 
 function assert(condition, message) {
@@ -43,7 +45,18 @@ assert(
   "最深买单应显示为相对现价的跌幅"
 );
 assert(deepestGridDropLabel(10, []) === "", "没有买单时不显示最深网格");
-assert(defaultStressDrop(10, grid.merged_ladder) === 30, "默认跌幅应落到当前最深买单");
+assert(defaultStressDrop(10, grid.merged_ladder) === 10, "默认跌幅应停在第一档会成交的位置");
+assert(deepestStressDrop(10, grid.merged_ladder) === 30, "最深档按钮仍是当前最深买单");
 assert(defaultStressDrop(10, []) === 10, "没有买单时默认跌幅为 -10%");
+const heavy = stressCashNote({
+  safetyLevel: "danger",
+  exhaustionDropPct: null,
+  cashDrainRatio: 85,
+});
+assert(!heavy.includes("依然安全"), "现金未耗尽时不能和临界警戒一起写依然安全");
+assert(heavy.includes("尚未耗尽"), "高消耗但未耗尽时应说明现金还在");
+const calm = stressCashNote({ safetyLevel: "safe", exhaustionDropPct: null, cashDrainRatio: 12 });
+assert(calm.includes("仍有余"), "买完仍有现金时应这么说");
+assert(!calm.includes("临界"), "安全结论里不应出现临界警戒");
 
 console.log("stressTestCalculator 测试通过");
