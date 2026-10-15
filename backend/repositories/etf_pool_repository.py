@@ -443,6 +443,55 @@ class ETFPoolRepository:
         finally:
             conn.close()
 
+    def list_subsector_members(self) -> List[tuple]:
+        """每个小类按 20 日均成交额从高到低列出成员，供代表未过线时顺延。"""
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                placeholders = ",".join(["%s"] * len(SHOPPABLE_SECTORS))
+                cursor.execute(
+                    f"""
+                    SELECT etf_code, name, sector, subsector_code, amount_ma20_10k
+                    FROM etf_instrument
+                    WHERE subsector_code IS NOT NULL AND subsector_code <> ''
+                      AND sector IN ({placeholders})
+                    ORDER BY subsector_code, amount_ma20_10k DESC, etf_code
+                    """,
+                    SHOPPABLE_SECTORS,
+                )
+                grouped: Dict[str, List[Dict[str, Any]]] = {}
+                for row in cursor.fetchall():
+                    grouped.setdefault(row["subsector_code"], []).append({
+                        "etf_code": row["etf_code"],
+                        "etf_name": row["name"],
+                        "sector": row["sector"],
+                        "subsector": row["subsector_code"],
+                        "amount_ma20_10k": row["amount_ma20_10k"],
+                    })
+                return list(grouped.items())
+        finally:
+            conn.close()
+
+    def set_subsector_seed(self, subsector: str, etf_code: str) -> None:
+        """一个小类只保留一只种子。"""
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE etf_instrument SET is_seed = 0 WHERE subsector_code = %s",
+                    (subsector,),
+                )
+                cursor.execute(
+                    """
+                    UPDATE etf_instrument SET is_seed = 1
+                    WHERE etf_code = %s AND subsector_code = %s
+                    """,
+                    (etf_code, subsector),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     def mark_seed_representatives(self) -> List[Dict[str, Any]]:
         """每个有成员的小类只标记流动性最高的一只。"""
         conn = self._connect()

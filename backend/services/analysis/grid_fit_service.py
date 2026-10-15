@@ -225,6 +225,34 @@ class GridFitBoardService:
                     })
         return self.progress_counts()
 
+    def run_representatives(
+        self,
+        groups: List[tuple],
+        sync_fn: Callable[[str], Any],
+        backtest_fn: Callable[[str, str], Dict[str, Any]],
+        pool_repo,
+    ) -> Dict[str, int]:
+        """每个小类先跑成交额最高的一只。未入榜时按成交额改试下一只。"""
+        for subsector, members in groups:
+            chosen = None
+            for member in members:
+                self.run_batch([member], sync_fn, backtest_fn)
+                if chosen is None:
+                    chosen = member["etf_code"]
+                if self._representative_ranked(member["etf_code"]):
+                    chosen = member["etf_code"]
+                    break
+            if chosen:
+                pool_repo.set_subsector_seed(subsector, chosen)
+        return self.progress_counts()
+
+    def _representative_ranked(self, code: str) -> bool:
+        for step_mode in STEP_MODES:
+            row = self.repo.find_run(code, step_mode, PROTOCOL_VERSION)
+            if row and row.get("status") == "ranked":
+                return True
+        return False
+
     def _universe_rows(self, sector_map: Optional[Dict[str, str]]) -> List[Dict[str, Any]]:
         resolved = []
         for row in self.repo.list_runs(PROTOCOL_VERSION):
@@ -410,6 +438,33 @@ def start_background_batch(universe, sync_fn, backtest_fn, repo=None) -> Dict[st
     def _worker():
         try:
             service.run_batch(universe, sync_fn, backtest_fn)
+            with _state_lock:
+                _job_state["status"] = "idle"
+        except Exception as exc:
+            logger.exception("适合度榜补齐失败: %s", exc)
+            with _state_lock:
+                _job_state["status"] = "idle"
+                _job_state["error"] = "适合度榜补齐失败"
+        finally:
+            _job_lock.release()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    return {"status": "started"}
+
+
+def start_background_representatives(groups, sync_fn, backtest_fn, pool_repo, repo=None) -> Dict[str, str]:
+    """后台按小类顺延代表。已有任务在跑时不重复启动。"""
+    if not _job_lock.acquire(blocking=False):
+        return {"status": "running"}
+    service = GridFitBoardService(repo)
+    with _state_lock:
+        _job_state["status"] = "running"
+        _job_state["error"] = None
+
+    def _worker():
+        try:
+            service.run_representatives(groups, sync_fn, backtest_fn, pool_repo)
             with _state_lock:
                 _job_state["status"] = "idle"
         except Exception as exc:

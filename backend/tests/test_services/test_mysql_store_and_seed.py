@@ -52,6 +52,8 @@ class TestMysqlStoreAndSeed(unittest.TestCase):
     def test_subsector_rules_are_exclusive(self):
         self.assertEqual(assign_subsector("科创50ETF华夏", "核心宽基"), "双创成长")
         self.assertEqual(assign_subsector("中药ETF汇添富", "医药健康"), "中药")
+        self.assertEqual(assign_subsector("医药ETF易方达", "医药健康"), "医药")
+        self.assertEqual(assign_subsector("创新药ETF", "医药健康"), "创新药")
         self.assertNotEqual(assign_subsector("生物医药ETF天弘", "医药健康"), "生物疫苗")
         self.assertIsNone(assign_subsector("恒生ETF华夏", "跨境全球"))
         self.assertEqual(assign_subsector("恒生ETF华夏", "跨境全球") or "跨境全球", "跨境全球")
@@ -123,6 +125,43 @@ class TestMysqlStoreAndSeed(unittest.TestCase):
         short = board.repo.find_run("159012", "atr", PROTOCOL_VERSION)
         self.assertEqual(failed["status"], "failed")
         self.assertEqual(short["status"], "not_ready")
+
+    def test_representative_falls_through_to_next_turnover(self):
+        """成交额最高的一只没过入榜线时，改试同小类下一只。"""
+        pool = ETFPoolRepository(database=TEST_DATABASE)
+        board = GridFitBoardService(GridFitRepository(database=TEST_DATABASE))
+        pool.save_pool([
+            _instrument("159021", "中药龙头", "医药健康", 9000),
+            _instrument("159022", "中药次席", "医药健康", 4000),
+            _instrument("512010", "医药ETF", "医药健康", 7000),
+        ])
+        pool.reclassify_persisted(AkShareClient.classify_etf_item)
+        tried = []
+
+        def sync_fn(code):
+            tried.append(code)
+            if code == "159021":
+                return {"calendar_days": 400, "fingerprint": "short"}
+            return {"calendar_days": 1825, "fingerprint": "full"}
+
+        def backtest_fn(_code, _step):
+            return {
+                "summary": {
+                    "grid_cash_profit": 100,
+                    "sell_trades_count": 80,
+                    "max_drawdown": 5,
+                    "annualized_return": 2,
+                },
+                "history_meta": {"actual_calendar_days": 1825},
+            }
+
+        run_subsector_seed(pool, board, sync_fn, backtest_fn)
+        seeds = {item["subsector"]: item["etf_code"] for item in pool.list_seeds()}
+        self.assertEqual(seeds.get("中药"), "159022")
+        self.assertEqual(seeds.get("医药"), "512010")
+        self.assertEqual(tried, ["159021", "159022", "512010"])
+        self.assertEqual(board.repo.find_run("159021", "atr", PROTOCOL_VERSION)["status"], "not_ready")
+        self.assertEqual(board.repo.find_run("159022", "atr", PROTOCOL_VERSION)["status"], "ranked")
 
     def test_non_seed_can_read_lake_without_grid_fit(self):
         market = MarketDataRepository(database=TEST_DATABASE)

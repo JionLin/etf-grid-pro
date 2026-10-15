@@ -9,7 +9,7 @@ from services.analysis.etf_analysis_service import ETFAnalysisService
 from services.analysis.grid_fit_service import (
     GridFitBoardService,
     build_protocol_callbacks,
-    start_background_batch,
+    start_background_representatives,
 )
 from repositories.backtest_repository import BacktestRepository
 from repositories.etf_pool_repository import ETFPoolRepository
@@ -462,23 +462,15 @@ def get_grid_fit_progress():
 def refresh_grid_fit():
     """按锁定协议补行情并写榜。不调用个人档案自动归档。"""
     try:
-        pool_repo.mark_seed_representatives()
-        universe = [
-            {
-                "etf_code": item["etf_code"],
-                "etf_name": item["etf_name"],
-                "sector": item["sector"],
-            }
-            for item in pool_repo.list_seeds()
-        ]
         sync_fn, backtest_fn = build_protocol_callbacks(
             etf_service,
             etf_service.akshare_client,
         )
-        started = start_background_batch(
-            universe,
+        started = start_background_representatives(
+            pool_repo.list_subsector_members(),
             sync_fn,
             backtest_fn,
+            pool_repo,
             grid_fit_service.repo,
         )
         return jsonify({'success': True, 'data': started})
