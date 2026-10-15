@@ -1327,6 +1327,18 @@ class AkShareClient:
         self._remember_quote_date(code, updated["quote_date"])
         updates.append((code, last["close"], last["pct_change"]))
 
+    def _bootstrap_in_progress(self) -> bool:
+        """引导未完成时，首页不要为了刷新价格再打一遍全市场行情。"""
+        try:
+            from repositories.universe_bootstrap_repository import UniverseBootstrapRepository
+        except ImportError:
+            from backend.repositories.universe_bootstrap_repository import UniverseBootstrapRepository
+        try:
+            return bool(UniverseBootstrapRepository().progress().get("active"))
+        except Exception as exc:
+            logger.warning("读取全市场引导进度失败: %s", exc)
+            return False
+
     def _pool_rebuild_on_cooldown(self) -> bool:
         """池子不满 20 只时，首页轮询不能每次都重拉全市场列表。"""
         last = float(getattr(self, "_pool_rebuild_at", 0.0) or 0.0)
@@ -1344,6 +1356,16 @@ class AkShareClient:
         """
         获取或构建全市场做 T 标的池（带月均 >= 3000 万、上市满 3 年、ATR >= 1.5% 三重品质护城河清洗，本地持久化）
         """
+        if not force_refresh and self._bootstrap_in_progress():
+            existing = self.pool_repo.get_pool(
+                min_amount_10k=min_amount_10k,
+                min_ma20_amount_10k=min_ma20_amount_10k,
+                min_atr_pct=min_atr_pct,
+                limit=500
+            )
+            logger.info("全市场日K仍在引导，先返回已落库的 %s 只", len(existing or []))
+            return self.attach_quote_dates(list(existing or []))
+
         if not force_refresh:
             existing = self.pool_repo.get_pool(
                 min_amount_10k=min_amount_10k,

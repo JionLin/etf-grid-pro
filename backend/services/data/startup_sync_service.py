@@ -29,13 +29,83 @@ LOCK_NAME = "etf_grid_startup_sync_lock"
 
 
 def pool_is_backfilling(status: Optional[Dict[str, Any]], item_count: int) -> bool:
-    """空池且启动同步仍在回补日 K 时，页面显示回补提示。失败后不再一直显示。"""
+    """全市场引导未完成时，即使池子里已经有标的，页面也要显示进度。"""
+    snapshot = status or {}
+    if snapshot.get("bootstrap_active"):
+        return True
     if item_count:
         return False
-    snapshot = status or {}
     if snapshot.get("last_error"):
         return False
     return bool(snapshot.get("backfilling"))
+
+
+def resume_universe_bootstrap(
+    *,
+    bootstrap_repo,
+    market_repo,
+    sync_service,
+    list_loader,
+    pool_builder,
+    workers: int = 5,
+    progress_callback=None,
+) -> Dict[str, Any]:
+    """续传全市场日 K。只拉还没有进度的代码，拉完后重建标的池。"""
+    saved = bootstrap_repo.saved_instruments()
+    latest = None
+    try:
+        latest = list_loader() or None
+    except Exception as exc:
+        logger.warning("拉取全市场名单失败，沿用已保存的名单: %s", exc)
+    instruments = latest or saved
+    if not instruments:
+        return {
+            "pending": [],
+            "complete": False,
+            "synced_now": False,
+            "done": 0,
+            "total": 0,
+            "reason": "empty_market_list",
+        }
+
+    bars = set(market_repo.codes_with_bars() or [])
+    pending = bootstrap_repo.prepare(instruments, bars)
+    progress = bootstrap_repo.progress()
+    if not pending:
+        return {
+            "pending": [],
+            "complete": True,
+            "synced_now": False,
+            "done": progress["done"],
+            "total": progress["total"],
+        }
+
+    def _record(result, index, total):
+        bootstrap_repo.record_result(result)
+        if progress_callback:
+            progress_callback(result, index, total)
+
+    summary = sync_service.sync_universe(
+        instruments=pending,
+        is_incremental=False,
+        workers=workers,
+        progress_callback=_record,
+    )
+    for result in summary.get("results") or []:
+        bootstrap_repo.record_result(result)
+    pending_after = bootstrap_repo.pending_instruments()
+    try:
+        pool_builder(force_refresh=True)
+    except Exception as exc:
+        logger.warning("引导后续建标的池失败: %s", exc)
+    progress = bootstrap_repo.progress()
+    return {
+        "pending": pending_after,
+        "complete": not pending_after,
+        "synced_now": True,
+        "done": progress["done"],
+        "total": progress["total"],
+    }
 
 
 def codes_from_spot_rows(rows: Optional[List[Dict[str, Any]]]) -> List[Dict[str, str]]:
@@ -73,14 +143,18 @@ class StartupSyncService:
         sync_service: Optional[UniverseBarSyncService] = None,
         matrix_service: Optional[UniverseMatrixBacktestService] = None,
         akshare_client: Optional[AkShareClient] = None,
+        bootstrap_repo=None,
     ):
         if hasattr(self, "_initialized") and self._initialized and market_repo is None:
             return
+        from repositories.universe_bootstrap_repository import UniverseBootstrapRepository
+
         self.market_repo = market_repo or MarketDataRepository()
         self.matrix_repo = matrix_repo or UniverseMatrixRepository()
         self.sync_service = sync_service or UniverseBarSyncService()
         self.matrix_service = matrix_service or UniverseMatrixBacktestService()
         self.client = akshare_client or AkShareClient()
+        self.bootstrap_repo = bootstrap_repo or UniverseBootstrapRepository()
 
         if not hasattr(self, "_status"):
             self._status: Dict[str, Any] = {
@@ -91,6 +165,9 @@ class StartupSyncService:
                 "synced_bars_count": 0,
                 "matrix_refreshed": False,
                 "backfilling": True,
+                "bootstrap_active": False,
+                "bootstrap_done": 0,
+                "bootstrap_total": 0,
             }
         self._initialized = True
 
@@ -229,53 +306,55 @@ class StartupSyncService:
             removed = self.market_repo.delete_preclose_session_bars()
             if removed:
                 logger.info("已清除 %s 根收盘前写入的当日 K 线，等待正式收盘覆盖。", removed)
-            freshness = self.check_freshness()
-            logger.info("启动数据新鲜度自检: %s", freshness)
-
-            universe = self._current_shoppable_universe()
-            needs_seed = isinstance(universe, list) and len(universe) == 0
-            seed_instruments = None
-            if needs_seed:
-                seed_instruments = self.codes_from_market_list()
-                if not seed_instruments:
+            bootstrap = self._resume_bootstrap(workers)
+            if bootstrap.get("reason") == "empty_market_list":
+                universe = self._current_shoppable_universe()
+                if isinstance(universe, list) and len(universe) == 0:
                     logger.warning("标的池为空且市场列表没有代码，跳过日 K 回补。")
                     self._set_status(
                         is_syncing=False,
                         current_stage="idle",
                         backfilling=False,
+                        bootstrap_active=False,
                         last_error="市场列表为空，未能回补日K",
                     )
-                    return {"status": "skipped", "reason": "empty_market_list", "freshness": freshness}
+                    return {"status": "skipped", "reason": "empty_market_list"}
+            if bootstrap.get("pending"):
+                self._remember_bootstrap(bootstrap, active=True)
+                self._set_status(is_syncing=False, current_stage="syncing_bars", backfilling=True)
+                return {
+                    "status": "partial",
+                    "reason": "universe_bootstrap_incomplete",
+                    "bootstrap": {
+                        "done": bootstrap.get("done") or 0,
+                        "total": bootstrap.get("total") or 0,
+                    },
+                }
+
+            freshness = self.check_freshness()
+            logger.info("启动数据新鲜度自检: %s", freshness)
 
             if (
                 not force
-                and not needs_seed
                 and not freshness["needs_bar_sync"]
                 and not freshness["needs_matrix_refresh"]
             ):
                 logger.info("本地日 K 线时序与回测矩阵已最新 (%s)，无需同步。", freshness["local_max_date"])
+                self._remember_bootstrap(bootstrap, active=False)
                 self._set_status(is_syncing=False, current_stage="idle", backfilling=False)
                 return {"status": "skipped", "reason": "already_up_to_date", "freshness": freshness}
 
             total_added = 0
-            if freshness["needs_bar_sync"] or force or needs_seed:
-                self._set_status(current_stage="syncing_bars", backfilling=needs_seed)
-                logger.info(
-                    "→ 启动 ETF 增量时序同步（%s）...",
-                    "空池先按市场列表回补" if needs_seed else "按已有标的池增量",
-                )
+            if freshness["needs_bar_sync"] or force:
+                self._set_status(current_stage="syncing_bars", backfilling=False, bootstrap_active=False)
+                logger.info("→ 启动 ETF 增量时序同步（按已有标的池增量）...")
                 sync_res = self.sync_service.sync_universe(
-                    instruments=seed_instruments,
+                    instruments=None,
                     is_incremental=True,
                     workers=workers,
                 )
                 total_added = sum(r.get("rows_added", 0) for r in sync_res.get("results", []))
                 logger.info("✓ 增量同步完成: 成功补录 %d 条最新日线，跳过 %d 只已最新标的", total_added, sync_res.get("skipped", 0))
-                if needs_seed and seed_instruments:
-                    try:
-                        self.client.build_or_get_etf_pool(force_refresh=True)
-                    except Exception as exc:
-                        logger.warning("空池日 K 回补后重建标的池失败: %s", exc)
 
             # 阶段 2: 内存多周期回测并刷新 universe_matrix_backtest 表
             self._set_status(current_stage="calculating_matrix")
@@ -300,6 +379,7 @@ class StartupSyncService:
                 synced_bars_count=total_added,
                 matrix_refreshed=True,
                 backfilling=False,
+                bootstrap_active=False,
                 last_error=None,
             )
             return {
@@ -342,6 +422,63 @@ class StartupSyncService:
         thread.start()
         logger.info("✓ 已激活非阻塞后台启动自检守护线程 (延迟 %.1f 秒调度)", delay_seconds)
         return thread
+
+    def run_full_universe_sync(self, workers: int = 5) -> Dict[str, Any]:
+        """同步全市场名单里还没有日 K 的代码，并重建标的池。不跑回测矩阵。"""
+        conn = None
+        has_lock = False
+        try:
+            conn = connect(DEFAULT_DATABASE)
+            has_lock = self.acquire_distributed_lock(conn)
+            if not has_lock:
+                logger.info("另一工作进程正在执行同步任务或持有锁，全市场引导跳过。")
+                return {"status": "skipped", "reason": "lock_held_by_another_process"}
+            self._set_status(
+                is_syncing=True,
+                current_stage="syncing_bars",
+                backfilling=True,
+                bootstrap_active=True,
+                last_error=None,
+            )
+            outcome = self._resume_bootstrap(workers)
+            active = bool(outcome.get("pending"))
+            self._remember_bootstrap(outcome, active=active)
+            self._set_status(
+                is_syncing=False,
+                current_stage="completed" if outcome.get("complete") else "syncing_bars",
+                backfilling=active,
+            )
+            status = "success" if outcome.get("complete") else "partial"
+            if outcome.get("reason") == "empty_market_list":
+                status = "skipped"
+            return {"status": status, **outcome}
+        finally:
+            if conn:
+                if has_lock:
+                    self.release_distributed_lock(conn)
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _resume_bootstrap(self, workers: int) -> Dict[str, Any]:
+        outcome = resume_universe_bootstrap(
+            bootstrap_repo=self.bootstrap_repo,
+            market_repo=self.market_repo,
+            sync_service=self.sync_service,
+            list_loader=self.codes_from_market_list,
+            pool_builder=self.client.build_or_get_etf_pool,
+            workers=workers,
+        )
+        self._remember_bootstrap(outcome, active=not outcome.get("complete"))
+        return outcome
+
+    def _remember_bootstrap(self, outcome: Dict[str, Any], active: bool) -> None:
+        self._set_status(
+            bootstrap_active=active,
+            bootstrap_done=outcome.get("done") or 0,
+            bootstrap_total=outcome.get("total") or 0,
+        )
 
     def _current_shoppable_universe(self) -> Any:
         getter = getattr(self.sync_service, "get_shoppable_universe", None)

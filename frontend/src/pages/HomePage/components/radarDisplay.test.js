@@ -90,6 +90,10 @@ test("maturity badges stay at zero while the pool is empty", () => {
   assert.equal(backfillHint(true, 0), "正在回补日K，完成后会自动出现标的");
   assert.equal(backfillHint(false, 0), "");
   assert.equal(backfillHint(true, 3), "");
+  assert.equal(
+    backfillHint(true, 53, { active: true, done: 312, total: 1702 }),
+    "标的池初始化中 312/1702"
+  );
 });
 
 test("maturity badges count the loaded rows", () => {

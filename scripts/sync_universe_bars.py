@@ -3,7 +3,7 @@
 做 T 成熟 ETF 日线时序同步与审计 CLI 工具
 
 用法示例:
-  # 1. 启动全量 5 年历史日 K 线并发同步 (默认 5 个线程)
+  # 1. 按全市场名单续传日 K。已有日 K 的代码不会重拉。
   python scripts/sync_universe_bars.py --full --workers 5
 
   # 2. 收盘后快速增量同步
@@ -42,7 +42,12 @@ def parse_args():
     mode_group.add_argument(
         "--full",
         action="store_true",
-        help="执行全量 5 年日 K 线同步（支持断点续传）",
+        help="按全市场名单续传日 K，已有日 K 的代码跳过，结束后重建标的池",
+    )
+    mode_group.add_argument(
+        "--universe",
+        action="store_true",
+        help="与 --full 相同：同步全市场名单，而不是只同步当前标的池",
     )
     mode_group.add_argument(
         "--incremental",
@@ -166,8 +171,16 @@ def main():
 
     if args.audit:
         run_audit(service, args.code)
-    elif args.incremental or args.full or args.code:
+    elif args.code or args.incremental:
         run_sync(service, args)
+    elif args.full or args.universe:
+        from services.data.startup_sync_service import StartupSyncService
+
+        starter = StartupSyncService(sync_service=service)
+        outcome = starter.run_full_universe_sync(workers=args.workers)
+        done = outcome.get("done") or 0
+        total = outcome.get("total") or 0
+        print(f"全市场引导{outcome.get('status')}：{done}/{total}")
     else:
         # 默认执行审计或提示帮助
         print("未指定执行模式，默认展示当前审计状态。使用 --help 查看参数。")

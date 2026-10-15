@@ -22,6 +22,8 @@ _BACKFILL_LATEST = re.compile(
 )
 
 _CONFLICT_KEYS = {
+    "universe_bootstrap": ("id",),
+    "universe_bootstrap_code": ("etf_code",),
     "etf_daily_bar": ("etf_code", "trade_date"),
     "etf_instrument": ("etf_code",),
     "etf_sector": ("sector_code",),

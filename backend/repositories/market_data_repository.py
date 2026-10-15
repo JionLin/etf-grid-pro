@@ -110,6 +110,21 @@ class MarketDataRepository:
             float(row.get("pct_chg", 0.0) or 0.0),
         )
 
+    def codes_with_bars(self) -> set:
+        """已经有至少一根日 K 的代码。引导续传时这些代码不再整段重拉。"""
+        try:
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT DISTINCT etf_code FROM etf_daily_bar")
+                    rows = cursor.fetchall()
+            finally:
+                conn.close()
+            return {str(row["etf_code"]) for row in rows if row.get("etf_code")}
+        except Exception as exc:
+            logger.warning("读取已有日 K 的代码失败: %s", exc)
+            return set()
+
     def get_date_range(self, etf_code: str) -> Dict[str, Any]:
         clean_code = etf_code.split(".")[0]
         empty = {"min_date": None, "max_date": None, "total_count": 0}

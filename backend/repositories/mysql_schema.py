@@ -14,6 +14,8 @@ from .sqlite_dialect import adapt_ddl
 logger = logging.getLogger(__name__)
 
 BUSINESS_TABLES = (
+    "universe_bootstrap_code",
+    "universe_bootstrap",
     "universe_matrix_backtest",
     "backtest_run_payload",
     "backtest_run",
@@ -77,6 +79,25 @@ _STATEMENTS = (
         created_at VARCHAR(32) NULL COMMENT '入库时间，东八区本地时间字符串',
         PRIMARY KEY (etf_code, trade_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='日K线'
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS universe_bootstrap (
+        id INTEGER NOT NULL PRIMARY KEY COMMENT '固定为 1 的引导状态行',
+        list_fetched_at VARCHAR(32) NULL COMMENT '最近一次拿到全市场名单的时间',
+        completed_at VARCHAR(32) NULL COMMENT '全市场日K引导完成时间。空表示尚未完成，启动时要续传',
+        total_codes INT NOT NULL DEFAULT 0 COMMENT '当前名单上的代码数',
+        done_codes INT NOT NULL DEFAULT 0 COMMENT '已有日K或确认源站无行情的代码数',
+        updated_at VARCHAR(32) NULL COMMENT '最近写入时间，东八区本地时间字符串'
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全市场日K引导进度。完成前不把标的池当成已经建完'
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS universe_bootstrap_code (
+        etf_code VARCHAR(16) NOT NULL COMMENT 'ETF代码，不含交易所前缀',
+        etf_name VARCHAR(128) NOT NULL COMMENT '名单上的名称',
+        status VARCHAR(16) NOT NULL COMMENT 'pending待拉取，synced已有日K，empty源站无行情',
+        updated_at VARCHAR(32) NULL COMMENT '最近写入时间，东八区本地时间字符串',
+        PRIMARY KEY (etf_code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全市场日K引导的逐代码进度'
     """,
     """
     CREATE TABLE IF NOT EXISTS grid_fit_cell (

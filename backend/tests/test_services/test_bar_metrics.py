@@ -54,12 +54,11 @@ def test_unfinished_today_bar_is_excluded_from_atr_and_turnover():
 
 def test_sync_does_not_store_today_before_close(monkeypatch):
     from backend.services.data import market_clock
+    import services.data.market_clock as used_clock
 
-    monkeypatch.setattr(
-        market_clock,
-        "shanghai_now",
-        lambda: datetime(2026, 10, 15, 11, 0, tzinfo=market_clock.SHANGHAI),
-    )
+    frozen = datetime(2026, 10, 15, 11, 0, tzinfo=market_clock.SHANGHAI)
+    monkeypatch.setattr(market_clock, "shanghai_now", lambda: frozen)
+    monkeypatch.setattr(used_clock, "shanghai_now", lambda: frozen)
     frame = pd.DataFrame({
         "trade_date": [pd.Timestamp("2026-10-14"), pd.Timestamp("2026-10-15")],
         "open": [1.0, 1.0],
