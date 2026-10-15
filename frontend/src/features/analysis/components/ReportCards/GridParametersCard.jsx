@@ -27,6 +27,7 @@ import {
 import { formatCurrency, formatPercent, formatDate, formatPriceDate } from "@shared/utils";
 import StressTestSandboxCard from "./StressTestSandboxCard";
 import { buildBrokerOrderSheet } from "./brokerOrderSheet";
+import { anchorSourceCaption } from "../ParameterForm/anchorRequest";
 import OrderLedgerCard from "./OrderLedgerCard";
 import { ETF_CATEGORIES } from "@shared/constants/etfCategories";
 
@@ -255,6 +256,14 @@ const GridParametersCard = ({
             </div>
             <div className="text-sm text-gray-700 font-medium">
               {isCustomBenchmark ? "基准锚点 (自定义)" : "实盘挂单锚点"}
+            </div>
+            <div className="text-xs font-semibold text-slate-700 mt-1">
+              锚点来源：{anchorSourceCaption({
+                anchorSource: gridStrategy?.anchor_source || inputParameters?.anchorSource || inputParameters?.anchor_source,
+                anchorLabel: gridStrategy?.anchor_label,
+                valuationPercentile: gridStrategy?.valuation_percentile ?? inputParameters?.valuationPercentile ?? inputParameters?.valuation_percentile,
+                dualMaPrice: gridStrategy?.dual_ma_price ?? inputParameters?.dualMaPrice ?? inputParameters?.dual_ma_price,
+              })}
             </div>
             <div className="text-xs text-gray-600 mt-1">
               {isCustomBenchmark ? `当前市场现价: ¥${current_price.toFixed(3)}` : getPriceDateText()}

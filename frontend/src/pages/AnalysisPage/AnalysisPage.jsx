@@ -13,6 +13,7 @@ import {
 } from "@shared/utils/url";
 import { checkDisclaimerStatus, acceptDisclaimer } from "@shared/utils/disclaimer";
 import { useShare } from "@shared/hooks/useShare";
+import { anchorSourceCaption } from "@features/analysis/components/ParameterForm/anchorRequest";
 
 /**
  * 分析页面组件
@@ -323,6 +324,17 @@ const AnalysisPage = () => {
                   <span>|</span>
                   <span>
                     周期：{periodDays}天{serverAnalysisDays ? "（服务端）" : ""}
+                  </span>
+                  <span>|</span>
+                  <span>
+                    锚点来源：
+                    {anchorSourceCaption({
+                      anchorSource: analysisData?.grid_strategy?.anchor_source || currentParams?.anchorSource,
+                      anchorLabel: analysisData?.grid_strategy?.anchor_label,
+                      valuationPercentile:
+                        analysisData?.grid_strategy?.valuation_percentile ?? currentParams?.valuationPercentile,
+                      dualMaPrice: analysisData?.grid_strategy?.dual_ma_price ?? currentParams?.dualMaPrice,
+                    })}
                   </span>
                   {currentParams?.benchmarkPrice && (
                     <>

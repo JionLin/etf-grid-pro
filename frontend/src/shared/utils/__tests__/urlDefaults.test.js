@@ -61,6 +61,37 @@ function runTests() {
   }
   console.log("  ✓ 面板显式加码与天数被正确保持");
 
+  const anchorEncoded = encodeAnalysisParams({
+    anchorSource: "percentile",
+    valuationPercentile: 20,
+    dualMaPrice: null,
+  });
+  const anchorParsed = parseAnalysisURL("/analysis/515220", `?${anchorEncoded.toString()}`);
+  if (anchorParsed.params.anchorSource !== "percentile" || anchorParsed.params.valuationPercentile !== 20) {
+    throw new Error(`分位锚点应随 URL 走，实际 ${JSON.stringify(anchorParsed.params)}`);
+  }
+  const dualEncoded = encodeAnalysisParams({
+    anchorSource: "dual_ma",
+    dualMaPrice: 1.318,
+  });
+  const dualParsed = parseAnalysisURL("/analysis/510500", `?${dualEncoded.toString()}`);
+  if (dualParsed.params.anchorSource !== "dual_ma" || dualParsed.params.dualMaPrice !== 1.318) {
+    throw new Error(`双均价应随 URL 走，实际 ${JSON.stringify(dualParsed.params)}`);
+  }
+  const kept = validateAndCompleteParams({
+    etfCode: "515220",
+    anchorSource: "percentile",
+    valuationPercentile: 20,
+  });
+  if (kept.params.anchorSource !== "percentile" || kept.params.valuationPercentile !== 20) {
+    throw new Error("补全参数时不应丢掉分位锚点");
+  }
+  const market = validateAndCompleteParams({ etfCode: "515220" });
+  if (market.params.anchorSource !== "market") {
+    throw new Error("未指定锚点时应按盘中最新价");
+  }
+  console.log("  ✓ 分位和双均价锚点能编码、解码并传给分析");
+
   console.log("🎉 URL 默认参数对齐测试全部通过！\n");
 }
 

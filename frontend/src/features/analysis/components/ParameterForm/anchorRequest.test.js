@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { anchorModeLabel, anchorRequestFields } from "./anchorRequest.js";
+import { anchorModeLabel, anchorRequestFields, anchorSourceCaption } from "./anchorRequest.js";
 
 test("percentile and dual moving average are separate anchor sources", () => {
   assert.deepEqual(anchorRequestFields({ mode: "percentile", percentile: 20 }), {
@@ -18,4 +18,13 @@ test("percentile and dual moving average are separate anchor sources", () => {
   assert.equal(anchorRequestFields({ mode: "dual_ma", dualMaPrice: "" }).dualMaPrice, null);
   assert.equal(anchorModeLabel("market"), "盘中最新价");
   assert.equal(anchorModeLabel("percentile"), "收盘价分位");
+});
+
+test("result caption names the anchor source that was requested", () => {
+  assert.equal(
+    anchorSourceCaption({ anchorSource: "percentile", anchorLabel: "收盘价分位", valuationPercentile: 20 }),
+    "收盘价分位 20%",
+  );
+  assert.equal(anchorSourceCaption({ anchorSource: "dual_ma", anchorLabel: "双均价" }), "双均价");
+  assert.equal(anchorSourceCaption({ anchorSource: "market" }), "盘中最新价");
 });

@@ -129,6 +129,25 @@ export const encodeAnalysisParams = (params) => {
     }
   }
 
+  // 开网锚点：盘中价、手填价、收盘价分位、双均价。缺了这些，分析页会退回盘中价。
+  const anchorSource = params.anchorSource || params.anchor_source;
+  if (anchorSource && ["market", "percentile", "dual_ma", "custom"].includes(anchorSource)) {
+    searchParams.set("anchor", anchorSource);
+  }
+  if (anchorSource === "percentile") {
+    const percentile = params.valuationPercentile ?? params.valuation_percentile;
+    const pct = parseFloat(percentile);
+    if (!isNaN(pct)) {
+      searchParams.set("pct", pct.toString());
+    }
+  }
+  if (anchorSource === "dual_ma") {
+    const dual = parseFloat(params.dualMaPrice ?? params.dual_ma_price);
+    if (!isNaN(dual) && dual > 0) {
+      searchParams.set("dual", dual.toString());
+    }
+  }
+
   return searchParams;
 };
 
@@ -230,6 +249,29 @@ export const decodeAnalysisParams = (searchParams) => {
     const priceNum = parseFloat(price);
     if (!isNaN(priceNum) && priceNum > 0) {
       params.benchmarkPrice = priceNum;
+    }
+  }
+
+  const anchor = searchParams.get("anchor") || searchParams.get("anchorSource");
+  if (anchor && ["market", "percentile", "dual_ma", "custom"].includes(anchor)) {
+    params.anchorSource = anchor;
+  } else if (params.benchmarkPrice) {
+    params.anchorSource = "custom";
+  }
+
+  const percentile = searchParams.get("pct") || searchParams.get("valuationPercentile");
+  if (percentile !== null && percentile !== undefined && percentile !== "") {
+    const pct = parseFloat(percentile);
+    if (!isNaN(pct) && pct >= 0 && pct <= 100) {
+      params.valuationPercentile = pct;
+    }
+  }
+
+  const dual = searchParams.get("dual") || searchParams.get("dualMaPrice");
+  if (dual !== null && dual !== undefined && dual !== "") {
+    const dualPrice = parseFloat(dual);
+    if (!isNaN(dualPrice) && dualPrice > 0) {
+      params.dualMaPrice = dualPrice;
     }
   }
 
@@ -359,6 +401,27 @@ export const validateAndCompleteParams = (params) => {
     const p = parseFloat(params.benchmarkPrice);
     if (!isNaN(p) && p > 0) {
       result.params.benchmarkPrice = p;
+    }
+  }
+
+  const anchorSource = params.anchorSource || params.anchor_source;
+  if (anchorSource && ["market", "percentile", "dual_ma", "custom"].includes(anchorSource)) {
+    result.params.anchorSource = anchorSource;
+  } else if (result.params.benchmarkPrice) {
+    result.params.anchorSource = "custom";
+  } else {
+    result.params.anchorSource = "market";
+  }
+
+  if (result.params.anchorSource === "percentile") {
+    const pct = parseFloat(params.valuationPercentile ?? params.valuation_percentile);
+    result.params.valuationPercentile = !isNaN(pct) && pct >= 0 && pct <= 100 ? pct : 50;
+  }
+
+  if (result.params.anchorSource === "dual_ma") {
+    const dual = parseFloat(params.dualMaPrice ?? params.dual_ma_price);
+    if (!isNaN(dual) && dual > 0) {
+      result.params.dualMaPrice = dual;
     }
   }
 

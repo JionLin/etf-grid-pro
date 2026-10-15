@@ -404,6 +404,8 @@ class ETFAnalysisService:
             )
             grid_params["anchor_label"] = anchor_label
             grid_params["anchor_source"] = anchor_source
+            grid_params["valuation_percentile"] = valuation_percentile if anchor_source == "percentile" else None
+            grid_params["dual_ma_price"] = dual_ma_price if anchor_source == "dual_ma" else None
             
             # 5. 生成策略分析依据
             strategy_rationale = self._generate_strategy_rationale(
@@ -447,6 +449,12 @@ class ETFAnalysisService:
                     'atrMultipliers': atr_multipliers,
                     'benchmark_price': benchmark_price,
                     'benchmarkPrice': benchmark_price,
+                    'anchor_source': anchor_source,
+                    'anchorSource': anchor_source,
+                    'valuation_percentile': valuation_percentile if anchor_source == "percentile" else None,
+                    'valuationPercentile': valuation_percentile if anchor_source == "percentile" else None,
+                    'dual_ma_price': dual_ma_price if anchor_source == "dual_ma" else None,
+                    'dualMaPrice': dual_ma_price if anchor_source == "dual_ma" else None,
                 }
             }
             
