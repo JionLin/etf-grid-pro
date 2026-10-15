@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBrokerOrderSheet } from "./brokerOrderSheet.js";
+import { brokerOrderRecords, buildBrokerOrderSheet } from "./brokerOrderSheet.js";
 
 test("broker sheet keeps the base position on its own row and merges same-price orders", () => {
   const sheet = buildBrokerOrderSheet({
@@ -22,4 +22,14 @@ test("broker sheet keeps the base position on its own row and merges same-price 
   assert.equal(lines[3], "515220\t买入\t1.280\t1000\t同价2笔已合并（小网500股，大网500股）");
   assert.equal(lines[4], "515220\t买入\t1.100\t800\t大网");
   assert.match(lines[5], /留利润不会自动执行/);
+  const records = brokerOrderRecords({
+    anchorPrice: 1.25,
+    basePosition: { shares: 12000, current_price: 1.25 },
+    orders: [
+      { action: "SELL", price: 1.317, shares: 400, tag: "小网" },
+      { action: "SELL", price: 1.317, shares: 300, tag: "中网" },
+    ],
+  });
+  assert.equal(records[0].note.includes("底仓"), true);
+  assert.equal(records[1].shares, 700);
 });

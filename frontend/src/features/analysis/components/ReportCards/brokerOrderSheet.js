@@ -12,19 +12,16 @@ function railLabel(order) {
   return order?.tag || order?.rail_name || order?.rail || "网格";
 }
 
-export function buildBrokerOrderSheet({ code, orders, basePosition, anchorPrice } = {}) {
-  const symbol = String(code || "").trim();
-  const rows = [["代码", "方向", "触发价", "股数", "备注"]];
-
+export function brokerOrderRecords({ orders, basePosition, anchorPrice } = {}) {
+  const records = [];
   const baseShares = Math.round(Number(basePosition?.shares) || 0);
   if (baseShares > 0) {
-    rows.push([
-      symbol,
-      "买入",
-      priceText(basePosition.current_price || basePosition.price || anchorPrice),
-      String(baseShares),
-      "底仓，单独下单，不是网格条件单",
-    ]);
+    records.push({
+      side: "买入",
+      trigger_price: Number(priceText(basePosition.current_price || basePosition.price || anchorPrice)),
+      shares: baseShares,
+      note: "底仓，单独下单，不是网格条件单",
+    });
   }
 
   const groups = new Map();
@@ -44,7 +41,27 @@ export function buildBrokerOrderSheet({ code, orders, basePosition, anchorPrice 
     const note = group.length > 1
       ? `同价${group.length}笔已合并（${group.map((item) => `${railLabel(item)}${item.shares}股`).join("，")}）`
       : railLabel(order);
-    rows.push([symbol, sideLabel(order), priceText(order.price), String(shares), note]);
+    records.push({
+      side: sideLabel(order),
+      trigger_price: Number(priceText(order.price)),
+      shares,
+      note,
+    });
+  });
+  return records;
+}
+
+export function buildBrokerOrderSheet({ code, orders, basePosition, anchorPrice } = {}) {
+  const symbol = String(code || "").trim();
+  const rows = [["代码", "方向", "触发价", "股数", "备注"]];
+  brokerOrderRecords({ orders, basePosition, anchorPrice }).forEach((record) => {
+    rows.push([
+      symbol,
+      record.side,
+      Number(record.trigger_price).toFixed(3),
+      String(record.shares),
+      record.note,
+    ]);
   });
 
   const table = rows.map((row) => row.join("\t")).join("\n");

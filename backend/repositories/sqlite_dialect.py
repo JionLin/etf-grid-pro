@@ -29,6 +29,7 @@ _CONFLICT_KEYS = {
     "grid_fit_cell": ("etf_code", "step_mode", "protocol_version"),
     "backtest_run_payload": ("run_id",),
     "universe_matrix_backtest": ("etf_code", "config_key"),
+    "grid_ledger_plan": ("etf_code",),
 }
 
 
@@ -126,6 +127,10 @@ class SqliteCursor:
         self._cursor.execute(adapted, tuple(params))
         self.rowcount = self._cursor.rowcount
         return self
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
 
     def executemany(self, statement: str, seq: Iterable[Sequence[Any]]):
         adapted = translate_sql(statement)

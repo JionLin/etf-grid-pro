@@ -27,6 +27,7 @@ import {
 import { formatCurrency, formatPercent, formatDate, formatPriceDate } from "@shared/utils";
 import StressTestSandboxCard from "./StressTestSandboxCard";
 import { buildBrokerOrderSheet } from "./brokerOrderSheet";
+import OrderLedgerCard from "./OrderLedgerCard";
 import { ETF_CATEGORIES } from "@shared/constants/etfCategories";
 
 const GridParametersCard = ({
@@ -1091,6 +1092,15 @@ const GridParametersCard = ({
                 </div>
               </div>
             )}
+
+            <OrderLedgerCard
+              etfCode={inputParameters?.etfCode || inputParameters?.etf_code || ""}
+              etfName={inputParameters?.etfName || inputParameters?.etf_name || ""}
+              anchorPrice={benchmarkPrice || current_price}
+              currentPrice={current_price}
+              basePosition={gridStrategy.composite_grid?.base_position}
+              orders={gridStrategy.composite_grid?.merged_ladder || []}
+            />
 
             {/* 模式二：方块矩阵紧凑视图 */}
             {viewMode === "matrix" && (

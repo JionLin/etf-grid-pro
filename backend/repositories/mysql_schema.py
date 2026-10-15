@@ -215,6 +215,34 @@ _STATEMENTS = (
         KEY idx_matrix_code (etf_code)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全市场做T成熟ETF多周期回测矩阵大宽表'
     """,
+    """
+    CREATE TABLE IF NOT EXISTS grid_ledger_plan (
+        id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        etf_code VARCHAR(16) NOT NULL COMMENT 'ETF代码，一只标的一份账本',
+        etf_name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '名称快照',
+        anchor_price DOUBLE NOT NULL DEFAULT 0 COMMENT '开网锚点',
+        base_shares INT NOT NULL DEFAULT 0 COMMENT '底仓股数',
+        base_price DOUBLE NOT NULL DEFAULT 0 COMMENT '底仓参考价',
+        created_at VARCHAR(32) NULL COMMENT '创建时间，东八区本地时间字符串',
+        updated_at VARCHAR(32) NULL COMMENT '最近写入时间，东八区本地时间字符串',
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_ledger_plan_code (etf_code)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地网格账本。一只标的保留当前方案'
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS grid_ledger_order (
+        id BIGINT NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+        plan_id BIGINT NOT NULL COMMENT '所属方案',
+        side VARCHAR(8) NOT NULL COMMENT '买入或卖出',
+        trigger_price DOUBLE NOT NULL COMMENT '触发价',
+        shares INT NOT NULL COMMENT '股数',
+        note VARCHAR(255) NOT NULL DEFAULT '' COMMENT '备注，如同价合并或底仓',
+        status VARCHAR(8) NOT NULL DEFAULT '未挂' COMMENT '未挂、已挂、已成、作废',
+        updated_at VARCHAR(32) NULL COMMENT '最近状态时间，东八区本地时间字符串',
+        PRIMARY KEY (id),
+        KEY idx_ledger_order_plan (plan_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账本里的每一笔委托'
+    """,
 )
 
 _COMMENT_ALTERS = (
