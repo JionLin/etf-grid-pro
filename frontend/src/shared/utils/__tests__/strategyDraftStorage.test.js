@@ -111,6 +111,15 @@ function runTests() {
   }
   console.log("  ✓ 公众号实测复现预设锁参正常");
 
+  const shouzhu = SYSTEM_PRESETS.find((item) => item.id === "eda_classic");
+  if (!shouzhu || shouzhu.params.stepMode !== "fixed_eda") {
+    throw new Error("守株预设必须使用 E大固定步长");
+  }
+  if (shouzhu.params.edaSteps.small !== 5 || shouzhu.params.edaSteps.large !== 30) {
+    throw new Error("守株预设步长应为 5% / 15% / 30%");
+  }
+  console.log("  ✓ 守株预设使用 E大 5/15/30");
+
   console.log("🎉 strategyDraftStorage 全部测试通过！");
 }
 

@@ -2,6 +2,7 @@ import {
   calculateOrderCommission,
   calculateRallyScenario,
   calculateStressTestScenario,
+  deepestGridDropLabel,
 } from "../stressTestCalculator.js";
 
 function assert(condition, message) {
@@ -35,5 +36,11 @@ assert(rally.triggeredSellShares === 100, `底仓只够卖 100 股，实际 ${ra
 assert(rally.stoppedByShares === true, "底仓不够时必须停");
 assert(rally.remainingShares === 100, "卖出后应留下不够下一档的底仓");
 assert(rally.returnedCash === 1099.8, `回笼现金应扣除 0.2 元最低佣金，实际 ${rally.returnedCash}`);
+
+assert(
+  deepestGridDropLabel(10, grid.merged_ladder) === "当前最深网格 -30.0%",
+  "最深买单应显示为相对现价的跌幅"
+);
+assert(deepestGridDropLabel(10, []) === "", "没有买单时不显示最深网格");
 
 console.log("stressTestCalculator 测试通过");

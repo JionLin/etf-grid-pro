@@ -17,6 +17,7 @@ import {
   STRESS_TEST_PRESETS,
   calculateRallyScenario,
   RALLY_TEST_PRESETS,
+  deepestGridDropLabel,
 } from "@shared/utils/stressTestCalculator";
 
 /**
@@ -67,6 +68,7 @@ const StressTestSandboxCard = ({
     ? Number((((currentPrice - deepestBuyOrder.price) / currentPrice) * 100).toFixed(1))
     : null;
   const isDeepBreached = Boolean(maxLadderDropPct && dropPct > maxLadderDropPct);
+  const deepestGridLabel = deepestGridDropLabel(currentPrice, compositeGrid.merged_ladder);
 
   const {
     targetPrice,
@@ -110,6 +112,11 @@ const StressTestSandboxCard = ({
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-bold text-gray-900">
                 极限行情压力测试沙盘
+                {deepestGridLabel ? (
+                  <span className="ml-2 text-sm font-semibold text-slate-600">
+                    {deepestGridLabel}
+                  </span>
+                ) : null}
               </h3>
               <span className="text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-300 px-2 py-0.5 rounded-full">
                 E大防穿透体系 · 毫秒级推演

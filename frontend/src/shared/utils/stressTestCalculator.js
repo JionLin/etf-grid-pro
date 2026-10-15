@@ -358,6 +358,20 @@ export const STRESS_TEST_PRESETS = [
 /**
  * 5 大经典上涨情景预设配置
  */
+export function deepestGridDropLabel(currentPrice, ladder) {
+  const price = Number(currentPrice);
+  const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0);
+  if (!price || buys.length === 0) {
+    return "";
+  }
+  const deepest = buys.reduce((min, item) => (Number(item.price) < Number(min.price) ? item : min));
+  const drop = ((price - Number(deepest.price)) / price) * 100;
+  if (drop <= 0) {
+    return "";
+  }
+  return `当前最深网格 -${drop.toFixed(1)}%`;
+}
+
 export const RALLY_TEST_PRESETS = [
   { rally: 10, label: "+10% 日常反弹", desc: "日常正常波段反弹，小网逐步卖出止盈" },
   { rally: 20, label: "+20% 波段牛市", desc: "波段牛市区间，小网全部出清，中网开始止盈" },
