@@ -18,6 +18,7 @@ from api import register_routes, register_middleware, setup_cors, setup_logging
 
 # 导入版本信息
 from config import PROJECT_VERSION
+from listen_bind import debug_enabled, resolve_listen_host
 
 # 系统版本号
 VERSION = PROJECT_VERSION
@@ -38,9 +39,9 @@ def create_app():
         app = Flask(__name__)
         app.logger.info("开发环境模式：仅提供API服务")
     
-    # 应用配置
+    # 应用配置。调试器默认关闭，只有显式 FLASK_DEBUG 才打开。
     app.config['ENV'] = FLASK_ENV
-    app.config['DEBUG'] = FLASK_ENV == 'development'
+    app.config['DEBUG'] = debug_enabled()
     app.config['VERSION'] = VERSION
     
     # 设置日志
@@ -55,6 +56,16 @@ def create_app():
     # 注册路由
     register_routes(app)
     
+    # 启动前备份 SQLite。测试进程不写备份，避免污染临时库。
+    if FLASK_ENV != 'testing' and not os.environ.get('PYTEST_CURRENT_TEST'):
+        try:
+            from services.data.sqlite_backup import backup_sqlite_database
+            backup_path = backup_sqlite_database()
+            if backup_path is not None:
+                app.logger.info(f"SQLite 已备份到 {backup_path}")
+        except Exception as ex:
+            app.logger.warning(f"SQLite 启动备份失败 (非阻塞): {ex}")
+
     # 启动后台数据新鲜度自检与增量自愈守护线程 (测试环境除外)
     if FLASK_ENV != 'testing' and not os.environ.get('PYTEST_CURRENT_TEST'):
         try:
@@ -127,13 +138,14 @@ if __name__ == '__main__':
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='ETF网格交易策略分析系统')
     parser.add_argument('--port', type=int, default=None, help='服务器端口号')
-    parser.add_argument('--host', type=str, default='0.0.0.0', help='服务器主机地址')
+    parser.add_argument('--host', type=str, default=None, help='服务器主机地址，默认 127.0.0.1')
+    parser.add_argument('--debug', action='store_true', help='显式打开调试器，默认关闭')
     args = parser.parse_args()
-    
-    # 优先级：命令行参数 > 环境变量 > 默认值
+
+    # 优先级：命令行参数 > 环境变量 > 本机回环
     port = args.port or int(os.environ.get('PORT', 5001))
-    host = args.host
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    
+    host = resolve_listen_host(args.host)
+    debug = debug_enabled(args.debug)
+
     app.logger.info(f"启动ETF网格交易策略分析系统，版本: {VERSION}, 端口: {port}")
     app.run(host=host, port=port, debug=debug)

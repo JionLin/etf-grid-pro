@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import CrisisReplayModal from "./CrisisReplayModal";
 import { isAbortError, runBacktest } from "@shared/services/api";
+import { cashYieldPct, formatSignedPercent, winRateDetail } from "./resultHeadline";
 
 function calculateProfitAttribution(summary, profitPool) {
   if (!summary) return null;
@@ -86,6 +87,7 @@ const BacktestCard = ({
   edaStepRatios = null,
   edaSteps = null,
   atrMultipliers = null,
+  riskPreference = "均衡",
   onHistoryMeta,
 }) => {
   const safeTotalCapital = Number(totalCapital || 30000);
@@ -124,6 +126,7 @@ const BacktestCard = ({
         edaStepRatios,
         edaSteps,
         atrMultipliers,
+        riskPreference,
         customBasePrice: activeCustomPrice,
       }, { signal });
       if (signal?.aborted) return;
@@ -147,7 +150,7 @@ const BacktestCard = ({
     const controller = new AbortController();
     fetchBacktest(backtestDays, null, controller.signal);
     return () => controller.abort();
-  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, atrMultipliers, anchorMode]);
+  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, atrMultipliers, riskPreference, anchorMode]);
 
   const summary = backtestData?.summary;
   const profitPool = backtestData?.profit_pool || summary?.profit_pool;
@@ -477,7 +480,7 @@ const BacktestCard = ({
               ¥{summary?.history_meta?.backtest_base_price ? Number(summary.history_meta.backtest_base_price).toFixed(3) : "..."}
             </span>
             <span className="text-slate-300">|</span>
-            <span>最新市价:</span>
+            <span>窗口末日收盘:</span>
             <span className="font-bold text-slate-800 bg-white border border-slate-200 px-2 py-0.5 rounded">
               ¥{summary?.history_meta?.latest_market_price ? Number(summary.history_meta.latest_market_price).toFixed(3) : "..."}
             </span>
@@ -612,20 +615,20 @@ const BacktestCard = ({
               </div>
             </div>
 
-            {/* 5. 胜率与风控 */}
+            {/* 5. 年化做T 与最大回撤 */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-purple-50/80 to-white border border-purple-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
-                <span>做T胜率 / 最大回撤</span>
+                <span>年化做T / 最大回撤</span>
                 <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-purple-900 font-mono">
-                  {summary.win_rate == null ? "—" : `${summary.win_rate}%`}
+                  {formatSignedPercent(cashYieldPct(summary))}
                 </span>
                 <span className="text-xs text-gray-500 font-mono">回撤 {summary.max_drawdown}%</span>
               </div>
               <div className="text-[11px] text-gray-500 mt-1 truncate" title={`总成交 ${summary.total_trades_count} 笔 (买${summary.buy_trades_count}/卖${summary.sell_trades_count})`}>
-                总成交 {summary.total_trades_count} 笔
+                差价现金利润折年，总成交 {summary.total_trades_count} 笔
               </div>
               {summary.unclosed_profit > 0 && (
                 <div className="text-[11px] text-amber-600 mt-0.5 truncate" title="底仓高抛后未按设计回调价买回的卖出，该部分利润为预估未实现">
@@ -634,6 +637,9 @@ const BacktestCard = ({
               )}
             </div>
           </div>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+            {winRateDetail(summary)}
+          </p>
 
           {/* 策略韧性与资金画像看板 (Sortino / 最长解套周期 / 资金利用率与安全垫) */}
           <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 via-gray-50/50 to-white border border-gray-200/80 shadow-2xs space-y-3">

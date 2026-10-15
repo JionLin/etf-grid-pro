@@ -13,6 +13,10 @@ from datetime import datetime
 import json
 
 from ..config import get_settings
+try:
+    from api.log_path import resolve_log_dir
+except ImportError:
+    from backend.api.log_path import resolve_log_dir
 
 
 class JSONFormatter(logging.Formatter):
@@ -104,7 +108,7 @@ class LogManager:
             return
         
         # 创建日志目录
-        log_dir = Path(self.settings.log_dir)
+        log_dir = resolve_log_dir(self.settings.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
         # 基础日志配置

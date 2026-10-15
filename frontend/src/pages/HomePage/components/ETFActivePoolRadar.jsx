@@ -15,6 +15,13 @@ import {
   filterByStoredSubsector,
   subsectorsForSector,
   aggregateSectorCounts,
+  maturityCounts,
+  backfillHint,
+  storageBadge,
+  poolAtrParams,
+  atrFloorLabel,
+  rankBadge,
+  rankPoolItems,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -33,6 +40,8 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   const [showUnclassified, setShowUnclassified] = useState(false);
   const [unclassifiedItems, setUnclassifiedItems] = useState([]);
   const [maturityFilter, setMaturityFilter] = useState("5y"); // 默认展示满 5 年期 (历经完整牛熊)
+  const [minAtr, setMinAtr] = useState("1.5");
+  const [commodityExempt, setCommodityExempt] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false); // 默认收拢，仅展示前 6 只精选
 
   // 搜索历史状态
@@ -95,26 +104,12 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     setSearchHistory([]);
   };
 
-  const renderScoreBadge = (score) => {
-    if (score === undefined || score === null) return null;
-    const num = Number(score);
-    if (num >= 80) {
-      return (
-        <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 shrink-0">
-          {num}分·极佳
-        </span>
-      );
-    }
-    if (num >= 60) {
-      return (
-        <span className="bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800 shrink-0">
-          {num}分·适中
-        </span>
-      );
-    }
+  const renderScoreBadge = (item) => {
+    const text = rankBadge(item);
+    if (!text) return null;
     return (
-      <span className="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-400 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
-        {num}分
+      <span className="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
+        {text}
       </span>
     );
   };
@@ -131,14 +126,24 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     const controller = new AbortController();
     fetchPoolData(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [minAtr, commodityExempt]);
+
+  useEffect(() => {
+    if (!poolData.backfilling) return undefined;
+    const timer = setInterval(() => {
+      fetchPoolData(undefined, { quiet: true });
+    }, 12000);
+    return () => clearInterval(timer);
+  }, [poolData.backfilling]);
 
   const fetchUnclassified = async (signal) => {
     try {
       const params = new URLSearchParams();
       params.append("sector", "未归类");
       params.append("min_ma20_amount", "3000");
-      params.append("min_atr", "1.5");
+      const atr = poolAtrParams(minAtr, commodityExempt);
+      params.append("min_atr", atr.min_atr);
+      params.append("commodity_exempt", atr.commodity_exempt);
       const res = await fetch(`/api/etf/pool?${params.toString()}`, { signal });
       const json = await res.json();
       if (signal?.aborted) return;
@@ -151,12 +156,15 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     }
   };
 
-  const fetchPoolData = async (signal) => {
-    setLoading(true);
+  const fetchPoolData = async (signal, options = {}) => {
+    if (!options.quiet) setLoading(true);
     try {
       const params = new URLSearchParams();
       params.append("min_ma20_amount", "3000");
-      params.append("min_atr", "1.5");
+      const atr = poolAtrParams(minAtr, commodityExempt);
+      params.append("min_atr", atr.min_atr);
+      params.append("commodity_exempt", atr.commodity_exempt);
+      if (options.refresh) params.append("refresh", "1");
 
       const res = await fetch(`/api/etf/pool?${params.toString()}`, { signal });
       const json = await res.json();
@@ -172,7 +180,6 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     }
   };
 
-  // 1. 第一级派生：基于当前上市成熟度过滤的基准标的池 (5年: 256只 | 3年: 358只 | 全量: 537只)
   const maturePoolItems = useMemo(() => {
     const rawItems = poolData.items || [];
     if (maturityFilter === "5y") {
@@ -184,21 +191,11 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     return rawItems;
   }, [poolData.items, maturityFilter]);
 
-  // 成熟度胶囊对应的自适应计数
-  const maturity5yCount = useMemo(() => {
-    const list = poolData.items || [];
-    return list.filter((it) => it.is_valid_5y).length || poolData.valid_5y_total || 256;
-  }, [poolData.items, poolData.valid_5y_total]);
-
-  const maturity3yCount = useMemo(() => {
-    const list = poolData.items || [];
-    return list.filter((it) => it.is_valid_3y).length || poolData.valid_3y_total || 358;
-  }, [poolData.items, poolData.valid_3y_total]);
-
-  const maturityAllCount = useMemo(() => {
-    const list = poolData.items || [];
-    return list.length || poolData.total || 537;
-  }, [poolData.items, poolData.total]);
+  const maturity = useMemo(() => maturityCounts(poolData.items), [poolData.items]);
+  const maturity5yCount = maturity.y5;
+  const maturity3yCount = maturity.y3;
+  const maturityAllCount = maturity.all;
+  const poolBackfillHint = backfillHint(poolData.backfilling, maturityAllCount);
 
   // 当前成熟度基准池总数与 T+0 动态计数
   const currentMaturityTotal = maturePoolItems.length;
@@ -262,7 +259,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
       );
     }
 
-    return result;
+    return rankPoolItems(result);
   }, [
     maturePoolItems,
     selectedSector,
@@ -301,7 +298,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
               全市场做 T 核心 ETF 选品雷达
             </h2>
             <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs px-2.5 py-1 rounded-full font-bold border border-emerald-200 dark:border-emerald-800">
-              本机 MySQL 直出
+              {storageBadge(poolData.storage_label)}
             </span>
             <Link
               to="/grid-fit"
@@ -313,7 +310,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1.5 flex items-center gap-1.5">
             <span>🛡️</span>
             <span>
-              三重品质护城河：已自动过滤上市未满 3 年次新、月均成交低于 3,000 万元及波幅低于 1.5% 的死水标的，精选高胜率做 T 标的池
+              三重品质护城河：已过滤上市未满 3 年次新、月均成交低于 3,000 万元的标的。{atrFloorLabel(minAtr, commodityExempt)}。
             </span>
           </p>
         </div>
@@ -415,11 +412,13 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           </div>
         </div>
         <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
-          {maturityFilter === "5y"
+          {poolBackfillHint
+            ? poolBackfillHint
+            : maturityFilter === "5y"
             ? "已精选历经完整牛熊大考的元老标的，历史回测扎实"
             : maturityFilter === "3y"
             ? "涵盖满3年的高流动细分ETF，兼顾弹性与周期稳定性"
-            : "全市场537只高流动做T标的全景，含近两年上市的高弹性次新"}
+            : "当前库里的高流动做T标的，含近两年上市的高弹性次新"}
         </span>
       </div>
 
@@ -522,6 +521,35 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           </button>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-gray-500 dark:text-gray-400">ATR 门槛:</span>
+          {[
+            ["1.5", "1.5% 默认"],
+            ["1.0", "放宽到 1.0%"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setMinAtr(value)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium ${
+                minAtr === value
+                  ? "bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold"
+                  : "text-gray-600 dark:text-gray-400"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={commodityExempt}
+              onChange={(event) => setCommodityExempt(event.target.checked)}
+            />
+            黄金/大宗商品豁免到 1.0%
+          </label>
+        </div>
+
         {/* ATR 弹性档位 */}
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-gray-500 dark:text-gray-400">ATR 弹性:</span>
@@ -575,7 +603,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="py-12 text-center text-gray-400 text-sm">
-          未匹配到符合条件的标的，可尝试切换其他细分赛道
+          {poolBackfillHint || "未匹配到符合条件的标的，可尝试切换其他细分赛道"}
         </div>
       ) : (
         <div className="space-y-3">
@@ -586,12 +614,23 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
               {searchKeyword.trim() ? " 搜索只作用于已返回列表，不是全宇宙。" : ""}
             </p>
           )}
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            有年化做T的标的单独排序；没有年化做T的只按价差分排在后面，两把尺子不混用。
+          </p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {renderedItems.map((item) => {
+          {renderedItems.map((item, index) => {
+            const opensSpreadGroup = item.score_kind !== "cash_yield"
+              && renderedItems.slice(0, index).some((row) => row.score_kind === "cash_yield")
+              && renderedItems.slice(0, index).every((row) => row.score_kind === "cash_yield");
             const isUp = item.pct_change >= 0;
             return (
+              <React.Fragment key={item.etf_code}>
+              {opensSpreadGroup && (
+                <p className="col-span-full text-xs font-semibold text-slate-500 dark:text-slate-400 pt-2">
+                  以下只有价差分，不与年化做T混排
+                </p>
+              )}
               <div
-                key={item.etf_code}
                 onClick={() => {
                   handleRecordHistory(item);
                   if (onSelectETF) onSelectETF(item.etf_code, item);
@@ -625,7 +664,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                           T+0
                         </span>
                       )}
-                      {renderScoreBadge(item.score)}
+                      {renderScoreBadge(item)}
                     </div>
                   </div>
 
@@ -657,7 +696,9 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                   {/* 第三行：行情与流动性指标 */}
                   <div className="grid grid-cols-2 gap-2 py-2 border-t border-b border-gray-50 dark:border-gray-700/50 text-xs mb-3">
                     <div>
-                      <span className="text-gray-400 block text-[11px]">最新价格</span>
+                      <span className="text-gray-400 block text-[11px]">
+                        最新价格{item.quote_date ? ` · ${item.quote_date}` : ""}
+                      </span>
                       <span className="font-bold font-mono text-gray-800 dark:text-gray-200">
                         ¥{Number(item.latest_price).toFixed(3)}
                       </span>
@@ -697,6 +738,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                   <span>快速测算 (载入右侧)</span>
                 </button>
               </div>
+              </React.Fragment>
             );
           })}
         </div>

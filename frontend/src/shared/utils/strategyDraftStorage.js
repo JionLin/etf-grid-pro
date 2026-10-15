@@ -24,20 +24,20 @@ export const LEGACY_KEYS = [
 ];
 
 export const DEFAULT_STRATEGY_PARAMS = {
-  etfCode: "510300",
+  etfCode: "",
   totalCapital: "30000",
   benchmarkMode: "market",
   customPrice: "",
   gridType: "等比",
   riskPreference: "均衡",
   adjustmentCoefficient: 1.0,
-  analysisDays: 180,
-  stepMode: "atr",
+  analysisDays: 1825,
+  stepMode: "fixed_eda",
   edaSteps: { small: 5, medium: 15, large: 30 },
   atrMultipliers: { small: 0.6, medium: 1.2, large: 2.5 },
   reinvestMode: "pool_shares",
-  scalingRatio: 0.1,
-  enableScaling: true,
+  scalingRatio: 0,
+  enableScaling: false,
 };
 
 export const SYSTEM_PRESETS = [
@@ -45,15 +45,15 @@ export const SYSTEM_PRESETS = [
     id: "eda_classic",
     name: "🏆 E大经典守株版",
     badge: "推荐",
-    description: "5%/15%/30% 经典大步长 · 模式B留股票池 · 倒金字塔加码10% · 5年牛熊",
+    description: "5%/15%/30% 经典大步长 · 模式B留股票池 · 各档等额 · 5年牛熊",
     params: {
       ...DEFAULT_STRATEGY_PARAMS,
       totalCapital: "30000",
       stepMode: "fixed_eda",
       edaSteps: { small: 5, medium: 15, large: 30 },
       reinvestMode: "pool_shares",
-      scalingRatio: 0.10,
-      enableScaling: true,
+      scalingRatio: 0,
+      enableScaling: false,
       analysisDays: 1825,
     },
   },
@@ -290,6 +290,23 @@ export function deleteCustomPreset(presetId) {
 /**
  * 彻底重置为出厂默认官方推荐状态
  */
+export function quickLaunchParams(panel = {}) {
+  const days = panel.analysisDays === undefined ? DEFAULT_STRATEGY_PARAMS.analysisDays : Number(panel.analysisDays);
+  const scaling = panel.scalingRatio === undefined ? DEFAULT_STRATEGY_PARAMS.scalingRatio : Number(panel.scalingRatio);
+  return {
+    etfCode: panel.etfCode || "",
+    totalCapital: panel.totalCapital === undefined ? Number(DEFAULT_STRATEGY_PARAMS.totalCapital) : panel.totalCapital,
+    stepMode: panel.stepMode || DEFAULT_STRATEGY_PARAMS.stepMode,
+    reinvestMode: panel.reinvestMode || DEFAULT_STRATEGY_PARAMS.reinvestMode,
+    scalingRatio: scaling,
+    analysisDays: days,
+    gridType: DEFAULT_STRATEGY_PARAMS.gridType,
+    riskPreference: DEFAULT_STRATEGY_PARAMS.riskPreference,
+    adjustmentCoefficient: DEFAULT_STRATEGY_PARAMS.adjustmentCoefficient,
+    edaSteps: { ...DEFAULT_STRATEGY_PARAMS.edaSteps },
+  };
+}
+
 export function resetToSystemDefault() {
   if (typeof window === "undefined" || !window.localStorage) return;
 

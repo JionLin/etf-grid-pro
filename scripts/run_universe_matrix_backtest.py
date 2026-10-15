@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-全市场 537 只做 T 成熟 ETF 多周期网格回测矩阵调度与赛道横评 CLI 工具
+做 T 成熟 ETF 多周期网格回测矩阵调度与赛道横评 CLI 工具
 
 默认策略配置:
   - 初始资金: 30,000 元
@@ -193,7 +193,7 @@ def print_sector_rankings(sector_stats: List[Dict[str, Any]]):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="全市场 537 只成熟 ETF 多周期回测矩阵调度")
+    parser = argparse.ArgumentParser(description="成熟 ETF 多周期回测矩阵调度")
     parser.add_argument("--workers", type=int, default=8, help="并行工作线程数 (默认 8)")
     parser.add_argument("--export-csv", type=str, default="data/universe_matrix_backtest.csv", help="CSV 导出路径")
     parser.add_argument("--export-json", type=str, default="data/universe_matrix_backtest.json", help="JSON 导出路径")
@@ -260,9 +260,9 @@ def main():
     try:
         matrix_repo = UniverseMatrixRepository()
         saved_db = matrix_repo.batch_save(results)
-        print(f"✓ 已全量原子沉淀至 MySQL universe_matrix_backtest 表 ({saved_db} 行记录)")
+        print(f"✓ 已全量原子沉淀至本地库 universe_matrix_backtest 表 ({saved_db} 行记录)")
     except Exception as db_err:
-        print(f"⚠️ 沉淀至 MySQL universe_matrix_backtest 失败: {db_err}")
+        print(f"⚠️ 沉淀至本地库 universe_matrix_backtest 失败: {db_err}")
 
     # 打印榜单与赛道横评
     print_top_ranking(results, top_n=args.top)

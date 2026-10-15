@@ -192,7 +192,7 @@ class ApiService {
   }
 
   /**
-   * 获取全市场 537 只成熟 ETF 多周期回测矩阵
+   * 获取本地库里的成熟 ETF 多周期回测矩阵
    */
   async getUniverseBacktestMatrix(params = {}, options = {}) {
     return this.get("/backtest/matrix", params, options);

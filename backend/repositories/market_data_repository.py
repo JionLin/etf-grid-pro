@@ -1,8 +1,14 @@
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
+from services.data.market_clock import (
+    SHANGHAI,
+    bar_saved_before_close,
+    session_bar_unfinished,
+)
 from .mysql_connection import DEFAULT_DATABASE, connect
 from .mysql_schema import ensure_database
 
@@ -10,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 _UPSERT_BARS = """
 INSERT INTO etf_daily_bar (
-    etf_code, trade_date, open, close, high, low, vol, amount, pct_chg
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    etf_code, trade_date, open, close, high, low, vol, amount, pct_chg, created_at
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON DUPLICATE KEY UPDATE
     open = VALUES(open),
     close = VALUES(close),
@@ -19,7 +25,8 @@ ON DUPLICATE KEY UPDATE
     low = VALUES(low),
     vol = VALUES(vol),
     amount = VALUES(amount),
-    pct_chg = VALUES(pct_chg)
+    pct_chg = VALUES(pct_chg),
+    created_at = VALUES(created_at)
 """
 
 
@@ -44,7 +51,14 @@ class MarketDataRepository:
         return text
 
     def save_bars(self, etf_code: str, bars: Union[pd.DataFrame, List[Dict[str, Any]]]) -> int:
-        records = self._to_records(etf_code, bars)
+        from services.data.market_clock import shanghai_now
+
+        captured_at = shanghai_now().strftime("%Y-%m-%d %H:%M:%S")
+        records = [
+            (*row, captured_at)
+            for row in self._to_records(etf_code, bars)
+            if not self._session_bar_unfinished(row[1])
+        ]
         if not records:
             return 0
         try:
@@ -59,6 +73,10 @@ class MarketDataRepository:
         except Exception as exc:
             logger.error("批量保存日 K 失败 (%s): %s", etf_code, exc)
             return 0
+
+    @staticmethod
+    def _session_bar_unfinished(trade_date: str) -> bool:
+        return session_bar_unfinished(trade_date)
 
     def _to_records(self, etf_code: str, bars: Union[pd.DataFrame, List[Dict[str, Any]]]) -> List[tuple]:
         if bars is None:
@@ -162,6 +180,39 @@ class MarketDataRepository:
 
     def get_all_bars(self, etf_code: str) -> pd.DataFrame:
         return self.get_bars(etf_code=etf_code, start_date=None, end_date=None)
+
+    def delete_preclose_session_bars(
+        self,
+        moment: Optional[datetime] = None,
+        etf_code: Optional[str] = None,
+    ) -> int:
+        """删掉收盘前写入的当天 K 线，让随后的同步用正式收盘覆盖。"""
+        now = moment or datetime.now(SHANGHAI)
+        today = now.strftime("%Y-%m-%d") if hasattr(now, "strftime") else str(now)[:10]
+        query = "SELECT etf_code, trade_date, created_at FROM etf_daily_bar WHERE trade_date = %s"
+        params: List[Any] = [today]
+        if etf_code:
+            query += " AND etf_code = %s"
+            params.append(etf_code.split(".")[0])
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                doomed = [
+                    (row["etf_code"], str(row["trade_date"])[:10])
+                    for row in rows
+                    if bar_saved_before_close(row["trade_date"], row.get("created_at"), now)
+                ]
+                for code, trade_date in doomed:
+                    cursor.execute(
+                        "DELETE FROM etf_daily_bar WHERE etf_code = %s AND trade_date = %s",
+                        (code, trade_date),
+                    )
+            conn.commit()
+            return len(doomed)
+        finally:
+            conn.close()
 
     def count_bars(self) -> int:
         conn = self._connect()

@@ -1,10 +1,12 @@
 import React from "react";
 import { Loader2, BarChart3, Target, TrendingUp, Zap } from "lucide-react";
+import { loadingAnalysisCopy } from "./loadingCopy";
 
 const LoadingSpinner = ({
   message = "正在分析中...",
   progress = 0,
   showProgress = false,
+  analysisDays,
 }) => {
   const steps = [
     { icon: BarChart3, text: "获取ETF数据", color: "text-blue-600" },
@@ -138,7 +140,7 @@ const LoadingSpinner = ({
             <div className="text-xs text-yellow-800">
               <p className="font-medium mb-1">分析说明</p>
               <p>
-                系统正在基于1年历史数据进行ATR算法分析，通常需要10-30秒完成。分析结果仅供参考，不构成投资建议。
+                {loadingAnalysisCopy(analysisDays)}
               </p>
             </div>
           </div>

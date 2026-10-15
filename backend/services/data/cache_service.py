@@ -2,10 +2,26 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
+
+from .market_clock import SHANGHAI, as_shanghai
+from .trading_calendar import load_trading_year
 from typing import Any, Optional, Dict, List
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_akshare_cache_dir(explicit: Optional[str] = None) -> str:
+    """缓存目录相对仓库根目录，不跟当前工作目录走。可用 AKSHARE_CACHE_DIR 覆盖。"""
+    repo_root = Path(__file__).resolve().parents[3]
+    raw = explicit if explicit else os.environ.get("AKSHARE_CACHE_DIR")
+    if not raw:
+        return str(repo_root / "cache" / "akshare")
+    path = Path(raw)
+    if not path.is_absolute():
+        path = repo_root / path
+    return str(path)
 
 
 class EnhancedCache:
@@ -262,7 +278,7 @@ class TradingDateManager:
         Returns:
             str: 最近的交易日 (YYYYMMDD格式)
         """
-        current_time = datetime.now()
+        current_time = as_shanghai(datetime.now(SHANGHAI))
         current_date = current_time.strftime('%Y%m%d')
         
         # 获取交易日历
@@ -297,44 +313,27 @@ class TradingDateManager:
         Returns:
             List[str]: 交易日列表
         """
-        # 先检查缓存
-        cached_calendar = self.cache.get_permanent_cache("trading_cal", str(year))
-        if cached_calendar:
-            logger.debug(f"从缓存获取{year}年交易日历")
-            return cached_calendar
-        
-        # 缓存未命中，调用akshare接口
+        if akshare_client and hasattr(akshare_client, "_get_trading_calendar_from_akshare"):
+            return akshare_client._get_trading_calendar_from_akshare(year)
+
         try:
             import akshare as ak
-            
-            # 如果提供了akshare客户端，使用客户端的方法
-            if akshare_client and hasattr(akshare_client, '_get_trading_calendar_from_akshare'):
-                trading_days = akshare_client._get_trading_calendar_from_akshare(year)
-            else:
-                # 直接调用akshare接口
+
+            def fetch_year(target_year: int) -> List[str]:
                 df = ak.tool_trade_date_hist_sina()
-                
                 if df.empty:
-                    logger.warning(f"获取{year}年交易日历失败：返回空数据")
+                    logger.warning(f"获取{target_year}年交易日历失败：返回空数据")
                     return []
-                
-                # 处理日期格式
-                df['trade_date'] = df['trade_date'].astype(str).str.replace('-', '')
-                
-                # 筛选年份
-                year_filter = df['trade_date'].str.startswith(str(year))
-                trading_days = df[year_filter]['trade_date'].tolist()
-            
+                df["trade_date"] = df["trade_date"].astype(str).str.replace("-", "")
+                year_filter = df["trade_date"].str.startswith(str(target_year))
+                return df[year_filter]["trade_date"].tolist()
+
+            trading_days = load_trading_year(self.cache, year, fetch_year)
             if not trading_days:
                 logger.warning(f"获取{year}年交易日历失败：无交易日数据")
                 return []
-            
-            # 保存到缓存
-            self.cache.set_permanent_cache("trading_cal", str(year), trading_days)
             logger.info(f"获取{year}年交易日历成功，共{len(trading_days)}个交易日")
-            
             return trading_days
-            
         except ImportError:
             logger.error("akshare库未安装，无法获取交易日历")
             return []

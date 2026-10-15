@@ -2,8 +2,6 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import pymysql
-
 from .mysql_connection import DEFAULT_DATABASE, connect
 from .mysql_schema import ensure_database
 
@@ -392,7 +390,7 @@ class UniverseMatrixRepository:
         ensure_database(DEFAULT_DATABASE)
         conn = connect(DEFAULT_DATABASE)
         try:
-            with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            with conn.cursor() as cur:
                 cur.execute(
                     "SELECT etf_code, is_valid_5y, is_valid_3y, is_valid_1y "
                     "FROM universe_matrix_backtest "

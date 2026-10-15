@@ -18,11 +18,7 @@ export default function HomePage() {
   const formSectionRef = useRef(null);
   const parameterFormRef = useRef(null);
   const [selectionMode, setSelectionMode] = useState("radar"); // 'radar' | 'matrix'
-  const [selectedEtfForQuick, setSelectedEtfForQuick] = useState({
-    code: "510300",
-    name: "华泰柏瑞沪深300ETF",
-    sector: "核心宽基",
-  });
+  const [selectedEtfForQuick, setSelectedEtfForQuick] = useState(null);
 
   // 处理分析请求 - 使用 SPA 客户端路由平滑跳转到分析页面
   const handleAnalysis = async (parameters) => {

@@ -3,6 +3,22 @@
  * 贯彻 E大“压力测试最重要”哲学，毫秒级推演各跌幅情景下的资金消耗、持仓均价摊薄与绝地脱困反弹阈值
  */
 
+/** 与回测引擎一致：万分之一，单笔最低 0.2 元。 */
+export const STRESS_COMMISSION_RATE = 0.0001;
+export const STRESS_MIN_COMMISSION = 0.2;
+
+/**
+ * 单笔佣金。费率按万分之一估算，再套上 0.2 元最低收费。
+ *
+ * @param {number} amount 成交金额
+ * @param {number} commissionRate 佣金费率
+ * @returns {number} 佣金
+ */
+export function calculateOrderCommission(amount, commissionRate = STRESS_COMMISSION_RATE) {
+  const variableFee = Math.round(Number(amount) * commissionRate * 100) / 100;
+  return Math.max(STRESS_MIN_COMMISSION, variableFee);
+}
+
 /**
  * 计算压力测试场景下的全套量化安全指标
  *
@@ -10,7 +26,7 @@
  * @param {number} totalCapital 总资金 (如 100000)
  * @param {number} currentPrice 基准现价 (如 1.341)
  * @param {number} dropPct 模拟跌幅百分比 (如 10, 20, 35, 40, 50，代表下跌 10%、35% 等)
- * @param {number} commissionRate 佣金费率 (默认 0.00005)
+ * @param {number} commissionRate 佣金费率 (默认万分之一)
  * @returns {Object} 包含推演价、资金消耗、摊薄均价、脱困反弹、三轨水淹热力图等全量指标
  */
 export function calculateStressTestScenario(
@@ -18,7 +34,7 @@ export function calculateStressTestScenario(
   totalCapital = 100000,
   currentPrice = 1.0,
   dropPct = 20,
-  commissionRate = 0.00005
+  commissionRate = STRESS_COMMISSION_RATE
 ) {
   if (!compositeGrid || !currentPrice) {
     return null;
@@ -48,27 +64,36 @@ export function calculateStressTestScenario(
   const railStats = {
     small: { name: "小网 (高频做T)", tag: "小网", total: 0, triggered: 0, shares: 0, cost: 0, color: "emerald" },
     medium: { name: "中网 (波段巡航)", tag: "中网", total: 0, triggered: 0, shares: 0, cost: 0, color: "blue" },
-    large: { name: "大网 (估值防守)", tag: "大网", total: 0, triggered: 0, shares: 0, cost: 0, color: "purple" },
+    large: { name: "大网 (深档防守)", tag: "大网", total: 0, triggered: 0, shares: 0, cost: 0, color: "purple" },
   };
 
+  let cashLeft = liquidCapital;
+  let stoppedByCash = false;
   buyOrders.forEach((order) => {
     const railKey = order.rail || "small";
     if (railStats[railKey]) {
       railStats[railKey].total += 1;
     }
+    if (stoppedByCash || targetPrice > order.price) {
+      return;
+    }
 
-    // 判定是否被当前水位淹没击穿 (目标价 <= 买单触发价)
-    if (targetPrice <= order.price) {
-      triggeredBuyShares += order.shares;
-      triggeredBuyCost += order.amount;
-      triggeredBuyFee += order.amount * commissionRate;
-      triggeredOrders.push(order);
+    const fee = calculateOrderCommission(order.amount, commissionRate);
+    const needed = order.amount + fee;
+    if (cashLeft + 1e-9 < needed) {
+      stoppedByCash = true;
+      return;
+    }
+    cashLeft -= needed;
+    triggeredBuyShares += order.shares;
+    triggeredBuyCost += order.amount;
+    triggeredBuyFee += fee;
+    triggeredOrders.push(order);
 
-      if (railStats[railKey]) {
-        railStats[railKey].triggered += 1;
-        railStats[railKey].shares += order.shares;
-        railStats[railKey].cost += order.amount;
-      }
+    if (railStats[railKey]) {
+      railStats[railKey].triggered += 1;
+      railStats[railKey].shares += order.shares;
+      railStats[railKey].cost += order.amount;
     }
   });
 
@@ -91,7 +116,7 @@ export function calculateStressTestScenario(
   let exhaustionPrice = null;
 
   for (const order of buyOrders) {
-    cumulativeCost += order.amount * (1 + commissionRate);
+    cumulativeCost += order.amount + calculateOrderCommission(order.amount, commissionRate);
     if (cumulativeCost >= liquidCapital && exhaustionDropPct === null) {
       exhaustionPrice = order.price;
       exhaustionDropPct = Number((((currentPrice - order.price) / currentPrice) * 100).toFixed(1));
@@ -104,7 +129,7 @@ export function calculateStressTestScenario(
   let safetyLabel = "资金安全 · 储备充裕";
   let safetyBadgeColor = "emerald";
 
-  if (consumedCash >= liquidCapital) {
+  if (stoppedByCash || consumedCash >= liquidCapital) {
     safetyLevel = "exhausted";
     safetyLabel = "子弹耗尽 · 底仓锁仓";
     safetyBadgeColor = "red";
@@ -162,6 +187,7 @@ export function calculateStressTestScenario(
     railStats,
     triggeredOrdersCount: triggeredOrders.length,
     totalBuyOrdersCount: buyOrders.length,
+    stoppedByCash,
   };
 }
 
@@ -175,7 +201,7 @@ export function calculateStressTestScenario(
  * @param {number} totalCapital 总资金
  * @param {number} currentPrice 基准现价
  * @param {number} rallyPct 模拟涨幅百分比 (如 10, 20, 50，代表上涨 10%、50% 等)
- * @param {number} commissionRate 佣金费率 (默认 0.00005)
+ * @param {number} commissionRate 佣金费率 (默认万分之一)
  * @returns {Object} 包含推演价、筹码流失率、回笼现金、做 T 利润、三轨卖出热力图等全量指标
  */
 export function calculateRallyScenario(
@@ -183,7 +209,7 @@ export function calculateRallyScenario(
   totalCapital = 100000,
   currentPrice = 1.0,
   rallyPct = 20,
-  commissionRate = 0.00005
+  commissionRate = STRESS_COMMISSION_RATE
 ) {
   if (!compositeGrid || !currentPrice) {
     return null;
@@ -215,26 +241,34 @@ export function calculateRallyScenario(
     large: { name: "大网 (趋势止盈)", tag: "大网", total: 0, triggered: 0, shares: 0, amount: 0, profit: 0, color: "purple" },
   };
 
+  let sharesLeft = baseShares;
+  let stoppedByShares = false;
   sellOrders.forEach((order) => {
     const railKey = order.rail || "small";
     if (railStats[railKey]) {
       railStats[railKey].total += 1;
     }
+    if (stoppedByShares || targetPrice < order.price) {
+      return;
+    }
 
-    // 判定是否被当前涨幅触发 (目标价 >= 卖单触发价)
-    if (targetPrice >= order.price) {
-      triggeredSellShares += order.shares;
-      triggeredSellAmount += order.amount;
-      triggeredSellFee += order.amount * commissionRate;
-      triggeredSellProfit += (order.est_profit || 0);
-      triggeredOrders.push(order);
+    if (sharesLeft < order.shares) {
+      stoppedByShares = true;
+      return;
+    }
+    sharesLeft -= order.shares;
+    const fee = calculateOrderCommission(order.amount, commissionRate);
+    triggeredSellShares += order.shares;
+    triggeredSellAmount += order.amount;
+    triggeredSellFee += fee;
+    triggeredSellProfit += (order.est_profit || 0);
+    triggeredOrders.push(order);
 
-      if (railStats[railKey]) {
-        railStats[railKey].triggered += 1;
-        railStats[railKey].shares += order.shares;
-        railStats[railKey].amount += order.amount;
-        railStats[railKey].profit += (order.est_profit || 0);
-      }
+    if (railStats[railKey]) {
+      railStats[railKey].triggered += 1;
+      railStats[railKey].shares += order.shares;
+      railStats[railKey].amount += order.amount;
+      railStats[railKey].profit += (order.est_profit || 0);
     }
   });
 
@@ -309,6 +343,7 @@ export function calculateRallyScenario(
     railStats,
     triggeredOrdersCount: triggeredOrders.length,
     totalSellOrdersCount: sellOrders.length,
+    stoppedByShares,
   };
 }
 
@@ -323,6 +358,60 @@ export const STRESS_TEST_PRESETS = [
 /**
  * 5 大经典上涨情景预设配置
  */
+function roundedDrop(currentPrice, orderPrice) {
+  const price = Number(currentPrice);
+  const level = Number(orderPrice);
+  if (!price || !(level > 0) || !(price > level)) return null;
+  const drop = ((price - level) / price) * 100;
+  if (!(drop > 0)) return null;
+  return Math.max(1, Math.min(60, Math.round(drop)));
+}
+
+export function deepestStressDrop(currentPrice, ladder) {
+  const price = Number(currentPrice);
+  const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0);
+  if (!price || buys.length === 0) return null;
+  const deepest = buys.reduce((min, item) => (Number(item.price) < Number(min.price) ? item : min));
+  return roundedDrop(price, deepest.price);
+}
+
+export function defaultStressDrop(currentPrice, ladder) {
+  const price = Number(currentPrice);
+  const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0 && Number(item.price) < price);
+  if (!price || buys.length === 0) return 10;
+  const nearest = buys.reduce((max, item) => (Number(item.price) > Number(max.price) ? item : max));
+  return roundedDrop(price, nearest.price) ?? 10;
+}
+
+export function stressCashNote(result) {
+  if (!result) return "";
+  const drained = result.safetyLevel === "exhausted" || result.stoppedByCash;
+  if (drained && result.exhaustionDropPct != null) {
+    return `子弹耗尽临界: -${result.exhaustionDropPct}%`;
+  }
+  if (result.safetyLevel === "danger" || result.safetyLevel === "warning" || result.safetyLevel === "exhausted") {
+    return `现金尚未耗尽，已消耗 ${result.cashDrainRatio}%`;
+  }
+  if (result.exhaustionDropPct != null) {
+    return `子弹耗尽临界: -${result.exhaustionDropPct}%`;
+  }
+  return "按当前网格买完，现金仍有余";
+}
+
+export function deepestGridDropLabel(currentPrice, ladder) {
+  const price = Number(currentPrice);
+  const buys = (ladder || []).filter((item) => item.action === "BUY" && Number(item.price) > 0);
+  if (!price || buys.length === 0) {
+    return "";
+  }
+  const deepest = buys.reduce((min, item) => (Number(item.price) < Number(min.price) ? item : min));
+  const drop = ((price - Number(deepest.price)) / price) * 100;
+  if (drop <= 0) {
+    return "";
+  }
+  return `当前最深网格 -${drop.toFixed(1)}%`;
+}
+
 export const RALLY_TEST_PRESETS = [
   { rally: 10, label: "+10% 日常反弹", desc: "日常正常波段反弹，小网逐步卖出止盈" },
   { rally: 20, label: "+20% 波段牛市", desc: "波段牛市区间，小网全部出清，中网开始止盈" },

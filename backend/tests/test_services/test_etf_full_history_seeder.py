@@ -1,6 +1,7 @@
 import pytest
 from backend.services.data.akshare_client import AkShareClient
 from backend.repositories.market_data_repository import MarketDataRepository
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestETFFullHistorySeeder:
@@ -8,6 +9,7 @@ class TestETFFullHistorySeeder:
 
     @pytest.fixture
     def client(self):
+        skip_without_mysql()
         return AkShareClient()
 
     @pytest.fixture

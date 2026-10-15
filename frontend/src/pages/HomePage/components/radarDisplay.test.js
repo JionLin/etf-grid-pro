@@ -8,6 +8,13 @@ import {
   filterByStoredSubsector,
   subsectorsForSector,
   aggregateSectorCounts,
+  maturityCounts,
+  backfillHint,
+  storageBadge,
+  poolAtrParams,
+  atrFloorLabel,
+  rankBadge,
+  rankPoolItems,
 } from "./radarDisplay.js";
 
 test("default collapse limit is 6 items", () => {
@@ -46,6 +53,52 @@ test("subsector counts come from the catalog, including zeros", () => {
     subsectorsForSector(summary, "医药健康").map((item) => item.count),
     [1, 0]
   );
+});
+
+test("cash yield and spread stay on separate ranking scales", () => {
+  const ordered = rankPoolItems([
+    { etf_code: "588000", score: 42, score_kind: "spread" },
+    { etf_code: "515220", score: 8.9, score_kind: "cash_yield" },
+    { etf_code: "512400", score: 12.6, score_kind: "cash_yield" },
+  ]);
+  assert.deepEqual(ordered.map((item) => item.etf_code), ["512400", "515220", "588000"]);
+});
+
+test("rank badge uses cash yield and drawdown instead of a saturated score", () => {
+  assert.equal(
+    rankBadge({ score: 12.6, score_kind: "cash_yield", max_drawdown: 18.2 }),
+    "年化做T 12.6% · 回撤 18.2%"
+  );
+  assert.equal(rankBadge({ score: 24.4, score_kind: "spread" }), "价差分 24.4");
+});
+
+test("atr floor can drop to 1.0 and labels the commodity exemption", () => {
+  assert.deepEqual(poolAtrParams("1.5", false), { min_atr: "1.5", commodity_exempt: "0" });
+  assert.deepEqual(poolAtrParams("1.0", true), { min_atr: "1.0", commodity_exempt: "1" });
+  assert.equal(atrFloorLabel("1.0", true), "波幅门槛 1.0%，黄金/大宗商品按 1.0% 豁免");
+});
+
+test("storage badge follows the configured database", () => {
+  assert.equal(storageBadge("本机 SQLite"), "本机 SQLite 直出");
+  assert.equal(storageBadge("本机 MySQL"), "本机 MySQL 直出");
+  assert.equal(storageBadge(undefined), "本地数据库直出");
+});
+
+test("maturity badges stay at zero while the pool is empty", () => {
+  assert.deepEqual(maturityCounts([]), { y5: 0, y3: 0, all: 0 });
+  assert.deepEqual(maturityCounts(undefined), { y5: 0, y3: 0, all: 0 });
+  assert.equal(backfillHint(true, 0), "正在回补日K，完成后会自动出现标的");
+  assert.equal(backfillHint(false, 0), "");
+  assert.equal(backfillHint(true, 3), "");
+});
+
+test("maturity badges count the loaded rows", () => {
+  const counts = maturityCounts([
+    { is_valid_5y: true, is_valid_3y: true },
+    { is_valid_5y: false, is_valid_3y: true },
+    { is_valid_5y: false, is_valid_3y: false },
+  ]);
+  assert.deepEqual(counts, { y5: 1, y3: 2, all: 3 });
 });
 
 test("aggregateSectorCounts dynamically computes counts matching mature pool", () => {

@@ -11,6 +11,14 @@ from .geometric_grid import GeometricGridCalculator
 
 logger = logging.getLogger(__name__)
 
+# 相对均衡档（0.6 倍 ATR）的步长倍率。低频步子更大，高频步子更小。
+FREQUENCY_STEP_SCALE = {
+    "低频": 1.5 / 0.6,
+    "均衡": 1.0,
+    "高频": 0.35 / 0.6,
+}
+
+
 class GridOptimizer:
     """网格优化器"""
     
@@ -79,7 +87,8 @@ class GridOptimizer:
                                   adjustment_coefficient: float = 1.0,
                                   step_mode: str = 'atr',
                                   eda_step_ratios: Optional[Dict[str, float]] = None,
-                                  atr_multipliers: Optional[Dict[str, float]] = None) -> Dict[str, Dict[str, Any]]:
+                                  atr_multipliers: Optional[Dict[str, float]] = None,
+                                  risk_preference: str = '均衡') -> Dict[str, Dict[str, Any]]:
         """
         计算大中小三层复合网格的自适应步长与资金配置
 
@@ -115,7 +124,7 @@ class GridOptimizer:
                 },
                 'large': {
                     'rail': 'large',
-                    'name': '大网 (估值防守)',
+                    'name': '大网 (深档防守)',
                     'tag': '大网',
                     'capital_ratio': 0.45,
                     'base_multiplier': 2.5,
@@ -155,8 +164,11 @@ class GridOptimizer:
                     step_ratio = eda_fixed_ratios.get(rail, 0.05)
                     multiplier = round(step_ratio / max(0.001, atr_ratio), 2)
                 else:
-                    base_m = custom_atr_mults.get(rail, conf['base_multiplier'])
-                    multiplier = base_m * adjustment_coefficient
+                    frequency_scale = FREQUENCY_STEP_SCALE.get(risk_preference, 1.0)
+                    if rail in custom_atr_mults:
+                        multiplier = custom_atr_mults[rail] * adjustment_coefficient
+                    else:
+                        multiplier = conf['base_multiplier'] * frequency_scale * adjustment_coefficient
                     step_ratio = atr_ratio * multiplier
 
                 # 约束合理范围 (0.2% - 50%，放宽上限以容纳自定义高达 50% 的大网)

@@ -32,13 +32,13 @@ export const REVERSE_PARAM_MAPPINGS = {
 
 // 默认参数值
 export const DEFAULT_PARAMS = {
-  capital: "100000",
+  capital: "30000",
   grid: "geometric", // 对应"等比"
   risk: "balanced", // 对应"均衡"
   adjustment: "1.0", // 调节系数默认值
-  stepMode: "atr", // 步长生成模式：'atr' | 'fixed_eda'
-  days: "180", // 历史分析周期：90 | 180 | 365
-  scaling: "0.1", // 逐格加码比例：默认 0.1 (10% 倒金字塔加码)
+  stepMode: "fixed_eda", // 出厂默认：E大守株 5/15/30
+  days: "1825", // 历史分析周期：出厂 5 年
+  scaling: "0", // 出厂等额，加码比例由面板传入
   reinvest: "pool_shares", // 做T收益留存模式：'pool_shares' | 'cash'
   edaSteps: "5,15,30", // E大原版自定义各轨步长比例：默认 5,15,30
   atrMultipliers: "0.6,1.2,2.5", // ATR自适应自定义各轨乘数：默认 0.6,1.2,2.5
@@ -126,6 +126,25 @@ export const encodeAnalysisParams = (params) => {
     const p = parseFloat(params.benchmarkPrice);
     if (!isNaN(p) && p > 0) {
       searchParams.set("price", p.toString());
+    }
+  }
+
+  // 开网锚点：盘中价、手填价、收盘价分位、双均价。缺了这些，分析页会退回盘中价。
+  const anchorSource = params.anchorSource || params.anchor_source;
+  if (anchorSource && ["market", "percentile", "dual_ma", "custom"].includes(anchorSource)) {
+    searchParams.set("anchor", anchorSource);
+  }
+  if (anchorSource === "percentile") {
+    const percentile = params.valuationPercentile ?? params.valuation_percentile;
+    const pct = parseFloat(percentile);
+    if (!isNaN(pct)) {
+      searchParams.set("pct", pct.toString());
+    }
+  }
+  if (anchorSource === "dual_ma") {
+    const dual = parseFloat(params.dualMaPrice ?? params.dual_ma_price);
+    if (!isNaN(dual) && dual > 0) {
+      searchParams.set("dual", dual.toString());
     }
   }
 
@@ -230,6 +249,29 @@ export const decodeAnalysisParams = (searchParams) => {
     const priceNum = parseFloat(price);
     if (!isNaN(priceNum) && priceNum > 0) {
       params.benchmarkPrice = priceNum;
+    }
+  }
+
+  const anchor = searchParams.get("anchor") || searchParams.get("anchorSource");
+  if (anchor && ["market", "percentile", "dual_ma", "custom"].includes(anchor)) {
+    params.anchorSource = anchor;
+  } else if (params.benchmarkPrice) {
+    params.anchorSource = "custom";
+  }
+
+  const percentile = searchParams.get("pct") || searchParams.get("valuationPercentile");
+  if (percentile !== null && percentile !== undefined && percentile !== "") {
+    const pct = parseFloat(percentile);
+    if (!isNaN(pct) && pct >= 0 && pct <= 100) {
+      params.valuationPercentile = pct;
+    }
+  }
+
+  const dual = searchParams.get("dual") || searchParams.get("dualMaPrice");
+  if (dual !== null && dual !== undefined && dual !== "") {
+    const dualPrice = parseFloat(dual);
+    if (!isNaN(dualPrice) && dualPrice > 0) {
+      params.dualMaPrice = dualPrice;
     }
   }
 
@@ -359,6 +401,27 @@ export const validateAndCompleteParams = (params) => {
     const p = parseFloat(params.benchmarkPrice);
     if (!isNaN(p) && p > 0) {
       result.params.benchmarkPrice = p;
+    }
+  }
+
+  const anchorSource = params.anchorSource || params.anchor_source;
+  if (anchorSource && ["market", "percentile", "dual_ma", "custom"].includes(anchorSource)) {
+    result.params.anchorSource = anchorSource;
+  } else if (result.params.benchmarkPrice) {
+    result.params.anchorSource = "custom";
+  } else {
+    result.params.anchorSource = "market";
+  }
+
+  if (result.params.anchorSource === "percentile") {
+    const pct = parseFloat(params.valuationPercentile ?? params.valuation_percentile);
+    result.params.valuationPercentile = !isNaN(pct) && pct >= 0 && pct <= 100 ? pct : 50;
+  }
+
+  if (result.params.anchorSource === "dual_ma") {
+    const dual = parseFloat(params.dualMaPrice ?? params.dual_ma_price);
+    if (!isNaN(dual) && dual > 0) {
+      result.params.dualMaPrice = dual;
     }
   }
 

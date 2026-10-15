@@ -1,14 +1,20 @@
+import os
 import unittest
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pandas as pd
+from backend.services.data.cache_service import resolve_akshare_cache_dir
 from backend.services.data.akshare_client import AkShareClient
 from backend.repositories.market_data_repository import MarketDataRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestAKShareClientFallbackPagination(unittest.TestCase):
     def setUp(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         self.client = AkShareClient()
         self.client.market_repo = MarketDataRepository(database=TEST_DATABASE)
@@ -217,6 +223,49 @@ class TestAKShareClientFallbackPagination(unittest.TestCase):
         self.assertEqual(first["current_price"], 1.23)
         self.assertEqual(second["etf_name"], "煤炭ETF")
         mock_spot.assert_called_once()
+
+    def test_tencent_fallback_quote_carries_shanghai_timestamp(self):
+        """盘中腾讯现价的锚点日期是今天，不能再落到上一交易日。"""
+        parts = [""] * 45
+        parts[1] = "煤炭ETF"
+        parts[3] = "1.303"
+        parts[4] = "1.292"
+        parts[5] = "1.300"
+        parts[6] = "1000"
+        parts[31] = "0.011"
+        parts[32] = "0.85"
+        parts[33] = "1.310"
+        parts[34] = "1.290"
+        parts[37] = "6804.765"
+        parts[38] = "1.2"
+        parts[43] = "1.5"
+        with patch.object(self.client, "cached_trading_days", return_value=None):
+            during = self.client._quote_from_tencent_parts(parts, datetime(2026, 10, 15, 11, 20))
+            before_open = self.client._quote_from_tencent_parts(parts, datetime(2026, 10, 15, 9, 0))
+        self.assertEqual(during["timestamp"], "2026-10-15 11:20:00")
+        self.assertEqual(during["trade_date"], "20261015")
+        self.assertEqual(during["current_price"], 1.303)
+        self.assertEqual(before_open["trade_date"], "20261014")
+        self.assertEqual(before_open["timestamp"], "2026-10-15 09:00:00")
+
+
+def test_akshare_cache_dir_is_under_repo_root(monkeypatch, tmp_path):
+    """从仓库根目录启动时，不能再去写上一级的 ../cache。"""
+    monkeypatch.delenv("AKSHARE_CACHE_DIR", raising=False)
+    previous = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        resolved = Path(resolve_akshare_cache_dir())
+        client = AkShareClient()
+    finally:
+        os.chdir(previous)
+    assert resolved.parts[-2:] == ("cache", "akshare")
+    assert resolved.is_absolute()
+    assert Path(client.cache.cache_dir) == resolved
+    monkeypatch.setenv("AKSHARE_CACHE_DIR", "custom-cache/akshare")
+    custom = Path(resolve_akshare_cache_dir())
+    assert custom.parts[-2:] == ("custom-cache", "akshare")
+    assert custom.is_absolute()
 
 
 if __name__ == "__main__":

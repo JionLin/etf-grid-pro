@@ -3,10 +3,15 @@ API中间件模块
 包含统一错误处理、请求日志、性能监控等中间件
 """
 
-import time
 import logging
+import time
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
 from flask import request, jsonify
 from datetime import datetime
+
+from .log_path import resolve_log_dir
 
 def register_middleware(app):
     """注册所有中间件到Flask应用"""
@@ -124,23 +129,48 @@ def setup_cors(app):
     app.logger.info("CORS中间件已配置")
 
 def setup_logging(app):
-    """日志配置中间件"""
-    # 确保日志配置正确
-    if not app.debug:
-        # 生产环境日志配置
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('app.log'),
-                logging.StreamHandler()
-            ]
+    """日志写到仓库 logs/，按大小轮转。应用日志只经根记录器出去一次。"""
+    if getattr(app, "_etf_logging_ready", False):
+        return
+    log_dir = resolve_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    target = (log_dir / "app.log").resolve()
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        filename = getattr(handler, "baseFilename", "")
+        if filename and Path(filename).name == "app.log" and Path(filename).resolve() != target:
+            root.removeHandler(handler)
+            handler.close()
+    if not _has_file_handler(root, target):
+        rotating = RotatingFileHandler(
+            target,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
         )
-    else:
-        # 开发环境日志配置
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-    
+        rotating.setFormatter(formatter)
+        root.addHandler(rotating)
+    if not any(_is_stream_handler(handler) for handler in root.handlers):
+        stream = logging.StreamHandler()
+        stream.setFormatter(formatter)
+        root.addHandler(stream)
+    level = logging.DEBUG if app.debug else logging.INFO
+    root.setLevel(level)
+    app.logger.handlers.clear()
+    app.logger.propagate = True
+    app.logger.setLevel(level)
+    app._etf_logging_ready = True
     app.logger.info("日志中间件已配置")
+
+
+def _has_file_handler(logger: logging.Logger, target: Path) -> bool:
+    for handler in logger.handlers:
+        filename = getattr(handler, "baseFilename", "")
+        if filename and Path(filename).resolve() == target:
+            return True
+    return False
+
+
+def _is_stream_handler(handler: logging.Handler) -> bool:
+    return isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler)

@@ -9,9 +9,17 @@ services:
       - "5001:5001"
     environment:
       - FLASK_ENV=production
+      - TZ=Asia/Shanghai
       - HOST=0.0.0.0
       - PORT=5001
       - TUSHARE_TOKEN=${TUSHARE_TOKEN}
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - SQLITE_PATH=${SQLITE_PATH:-/app/data/etf_grid.sqlite}
+      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-etf_grid}
     env_file:
       - .env
     volumes:
@@ -19,6 +27,7 @@ services:
       - ./logs:/app/logs
       # 挂载缓存目录（可选）
       - ./cache:/app/cache
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]

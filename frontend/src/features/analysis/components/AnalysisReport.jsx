@@ -29,6 +29,7 @@ function buildBacktestProps(backtestParams, derived) {
     edaStepRatios: source.edaStepRatios || source.eda_step_ratios || null,
     edaSteps: source.edaSteps || null,
     atrMultipliers: source.atrMultipliers || source.atr_multipliers || null,
+    riskPreference: source.riskPreference || source.risk_preference || "均衡",
   };
 }
 
@@ -108,6 +109,7 @@ const AnalysisReport = ({
     edaStepRatios: inputParameters?.eda_step_ratios || inputParameters?.edaStepRatios || null,
     edaSteps: inputParameters?.edaSteps || null,
     atrMultipliers: inputParameters?.atr_multipliers || inputParameters?.atrMultipliers || null,
+    riskPreference: inputParameters?.risk_preference || inputParameters?.riskPreference || "均衡",
   };
   const backtestProps = buildBacktestProps(backtestParams, derivedBacktest);
   const showBacktest = loading || BACKTEST_TABS.has(activeTab);
@@ -140,6 +142,7 @@ const AnalysisReport = ({
           message="正在分析ETF数据..."
           showProgress={true}
           progress={75}
+          analysisDays={backtestParams?.analysisDays || backtestParams?.analysis_days}
         />
       )}
 
@@ -162,7 +165,7 @@ const AnalysisReport = ({
       )}
 
       {!loading && analysisComplete && (
-        <div className="bg-white rounded-xl shadow-lg">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-transparent dark:border-gray-700 min-w-0">
           <ReportTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
           <div className="p-6">
@@ -221,8 +224,8 @@ const AnalysisReport = ({
 
       {!loading && analysisComplete && (
         <>
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">讨论与反馈</h3>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-transparent dark:border-gray-700 p-4 sm:p-6 min-w-0">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">讨论与反馈</h3>
             <div ref={giscusRef} className="giscus-container"></div>
           </div>
           <Disclaimer />

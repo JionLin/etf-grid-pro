@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -17,6 +17,10 @@ import {
   STRESS_TEST_PRESETS,
   calculateRallyScenario,
   RALLY_TEST_PRESETS,
+  deepestGridDropLabel,
+  deepestStressDrop,
+  defaultStressDrop,
+  stressCashNote,
 } from "@shared/utils/stressTestCalculator";
 
 /**
@@ -31,8 +35,16 @@ const StressTestSandboxCard = ({
   // 方向切换: "down" 下跌防穿透 | "up" 上涨防踏空
   const [direction, setDirection] = useState("down");
 
-  // 当前推演跌幅百分比 (默认 20%)
-  const [dropPct, setDropPct] = useState(20);
+  const [dropTouched, setDropTouched] = useState(false);
+  const [dropPct, setDropPct] = useState(10);
+  useEffect(() => {
+    if (dropTouched) return;
+    setDropPct(defaultStressDrop(currentPrice, compositeGrid?.merged_ladder));
+  }, [dropTouched, currentPrice, compositeGrid]);
+  const chooseDrop = (value) => {
+    setDropTouched(true);
+    setDropPct(value);
+  };
 
   // 当前推演涨幅百分比 (默认 20%)
   const [rallyPct, setRallyPct] = useState(20);
@@ -67,6 +79,9 @@ const StressTestSandboxCard = ({
     ? Number((((currentPrice - deepestBuyOrder.price) / currentPrice) * 100).toFixed(1))
     : null;
   const isDeepBreached = Boolean(maxLadderDropPct && dropPct > maxLadderDropPct);
+  const deepestGridLabel = deepestGridDropLabel(currentPrice, compositeGrid.merged_ladder);
+  const deepestDrop = deepestStressDrop(currentPrice, compositeGrid.merged_ladder);
+  const cashNote = stressCashNote(result);
 
   const {
     targetPrice,
@@ -110,6 +125,11 @@ const StressTestSandboxCard = ({
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-bold text-gray-900">
                 极限行情压力测试沙盘
+                {deepestGridLabel ? (
+                  <span className="ml-2 text-sm font-semibold text-slate-600">
+                    {deepestGridLabel}
+                  </span>
+                ) : null}
               </h3>
               <span className="text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-300 px-2 py-0.5 rounded-full">
                 E大防穿透体系 · 毫秒级推演
@@ -187,7 +207,7 @@ const StressTestSandboxCard = ({
               <button
                 key={p.drop}
                 type="button"
-                onClick={() => setDropPct(p.drop)}
+                onClick={() => chooseDrop(p.drop)}
                 title={p.desc}
                 className={`py-2 px-2.5 rounded-xl text-xs font-medium transition-all text-center flex flex-col items-center justify-center gap-0.5 border ${
                   isSelected
@@ -207,6 +227,19 @@ const StressTestSandboxCard = ({
             );
           })}
         </div>
+        {deepestDrop ? (
+          <button
+            type="button"
+            onClick={() => chooseDrop(deepestDrop)}
+            className={`w-full py-2 px-3 rounded-xl text-xs font-semibold border ${
+              dropPct === deepestDrop
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            最深档 -{deepestDrop}%
+          </button>
+        ) : null}
 
         {/* 连续平滑滑块 */}
         <div className="pt-2">
@@ -223,7 +256,7 @@ const StressTestSandboxCard = ({
             max="60"
             step="1"
             value={dropPct}
-            onChange={(e) => setDropPct(Number(e.target.value))}
+            onChange={(e) => chooseDrop(Number(e.target.value))}
             className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900 transition-all"
           />
         </div>
@@ -269,11 +302,10 @@ const StressTestSandboxCard = ({
             </div>
           </div>
           <div className="mt-2.5 pt-2 border-t border-gray-100 text-[11px] text-gray-500 font-mono">
-            {exhaustionDropPct !== null ? (
-              <span>子弹耗尽临界: -{exhaustionDropPct}% (¥{result.exhaustionPrice})</span>
-            ) : (
-              <span className="text-emerald-700 font-medium">跌穿-60%资金依然安全</span>
-            )}
+            <span className={safetyLevel === "safe" ? "text-emerald-700 font-medium" : "text-slate-700 font-medium"}>
+              {cashNote}
+              {exhaustionDropPct !== null && safetyLevel === "exhausted" ? ` (¥${result.exhaustionPrice})` : ""}
+            </span>
           </div>
         </div>
 

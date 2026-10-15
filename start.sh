@@ -11,7 +11,7 @@ if [ ! -f ".env" ]; then
     echo "=================================="
     echo "💡 快速初始化指南："
     echo "  1. 复制配置文件模板:  cp .env.example .env"
-    echo "  2. 编辑 .env 文件填入你的 Tushare Token (免费注册获取: https://tushare.pro/register)"
+    echo "  2. 编辑 .env。默认 SQLite，无需 MySQL。Tushare Token 可留空，只有调用 Tushare 时才要填"
     echo "=================================="
     exit 1
 fi
@@ -49,12 +49,14 @@ cleanup() {
 
 trap cleanup INT TERM
 
+echo "数据库默认 SQLite（data/etf_grid.sqlite）。改用 MySQL 时在 .env 设置 DB_TYPE=mysql 并填写 MYSQL_*。"
+
 # 1. 检查后端服务 (端口 5001)
 if check_port 5001; then
     echo "✅ 后端服务已在运行 (端口 5001 活跃)"
 else
     echo "📦 启动后端服务..."
-    uv run python backend/app.py &
+    uv run python backend/app.py --host 127.0.0.1 &
     BACKEND_PID=$!
     backend_ready=0
     for i in {1..12}; do

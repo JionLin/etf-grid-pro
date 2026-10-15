@@ -239,16 +239,10 @@ class EnvironmentValidator:
         """验证环境变量配置"""
         errors = []
         
-        # 检查必需的环境变量
-        required_vars = ['TUSHARE_TOKEN']
-        for var in required_vars:
-            if not os.getenv(var):
-                errors.append(f"必需的环境变量 {var} 未设置")
-        
-        # 检查TUSHARE_TOKEN格式
-        tushare_token = os.getenv('TUSHARE_TOKEN')
-        if tushare_token and len(tushare_token) != 32:
-            errors.append("TUSHARE_TOKEN必须是32位字符")
+        # Tushare Token 只在真正调用 Tushare 时才需要，空值可以启动 SQLite。
+        tushare_token = (os.getenv('TUSHARE_TOKEN') or '').strip()
+        if tushare_token and tushare_token != 'your_real_tushare_token_here' and len(tushare_token) < 16:
+            errors.append("TUSHARE_TOKEN长度至少16位")
         
         # 检查环境类型
         env = os.getenv('ENVIRONMENT', 'development')

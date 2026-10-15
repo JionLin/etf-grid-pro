@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     api_timeout: int = Field(default=30, description="API超时时间(秒)")
     
     # 数据库和缓存配置
-    tushare_token: str = Field(..., description="Tushare API Token")
+    tushare_token: str = Field(default="", description="Tushare API Token，只有调用 Tushare 时才需要")
     cache_dir: str = Field(default="cache", description="缓存目录")
     cache_ttl_seconds: int = Field(default=3600, description="缓存过期时间(秒)")
     cache_max_size: int = Field(default=1000, description="缓存最大条目数")
@@ -70,8 +70,7 @@ class Settings(BaseSettings):
     def validate_tushare_token(cls, v):
         """验证Tushare Token"""
         if not v:
-            raise ValueError('TUSHARE_TOKEN环境变量是必需的')
-        # 放宽长度验证，实际Tushare Token可能不是32位
+            return ""
         if len(v) < 16:
             raise ValueError('TUSHARE_TOKEN长度至少16位')
         return v

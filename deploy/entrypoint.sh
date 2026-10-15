@@ -19,6 +19,12 @@ if [ -z "$TUSHARE_TOKEN" ] || [ "$TUSHARE_TOKEN" = "your_tushare_token_here" ]; 
     echo "⚠️  警告: TUSHARE_TOKEN未正确配置，某些功能可能无法使用"
 fi
 
+DB_TYPE=${DB_TYPE:-sqlite}
+mkdir -p /app/data
+if [ "$DB_TYPE" = "mysql" ] && { [ -z "$MYSQL_USER" ] || [ -z "$MYSQL_PASSWORD" ]; }; then
+    echo "⚠️  警告: DB_TYPE=mysql 但未配置 MYSQL_USER / MYSQL_PASSWORD"
+fi
+
 # 根据环境选择启动方式
 if [ "$FLASK_ENV" = "development" ]; then
     echo "🔧 开发环境模式启动..."

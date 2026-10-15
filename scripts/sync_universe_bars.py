@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-全市场 537 只做 T 成熟 ETF 日线时序同步与审计 CLI 工具
+做 T 成熟 ETF 日线时序同步与审计 CLI 工具
 
 用法示例:
   # 1. 启动全量 5 年历史日 K 线并发同步 (默认 5 个线程)
   python scripts/sync_universe_bars.py --full --workers 5
 
-  # 2. 每日收盘后快速增量同步
+  # 2. 收盘后快速增量同步
   python scripts/sync_universe_bars.py --incremental
 
   # 3. 审计当前 MySQL 本地日 K 覆盖率与健康状态
@@ -35,7 +35,7 @@ from services.data.universe_bar_sync_service import UniverseBarSyncService
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="537 只做 T 成熟 ETF 日 K 线 MySQL 批量同步与审计工具",
+        description="做 T 成熟 ETF 日 K 线本地库批量同步与审计工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     mode_group = parser.add_mutually_exclusive_group()
@@ -47,12 +47,12 @@ def parse_args():
     mode_group.add_argument(
         "--incremental",
         action="store_true",
-        help="执行每日收盘后轻量增量同步（拉取最近交易日 K 线）",
+        help="收盘后轻量增量同步（拉取最近交易日 K 线）",
     )
     mode_group.add_argument(
         "--audit",
         action="store_true",
-        help="审计当前数据库中 537 只标的的健康度与覆盖情况",
+        help="审计当前数据库中标的的健康度与覆盖情况",
     )
 
     parser.add_argument(
@@ -77,7 +77,7 @@ def parse_args():
 
 
 def run_audit(service: UniverseBarSyncService, code: Optional[str] = None):
-    print("\n🔍 正在审计本地 MySQL (etf_daily_bar) 数据健康度...\n")
+    print("\n🔍 正在审计本地库 (etf_daily_bar) 数据健康度...\n")
     if code:
         universe = [{"etf_code": code, "name": "指定标的", "sector": "-"}]
     else:
@@ -121,7 +121,7 @@ def run_sync(service: UniverseBarSyncService, args):
         start_date, end_date = service.get_default_5y_dates()
         mode_desc = f"5 年全量同步模式 ({start_date} ~ {end_date})"
 
-    print(f"\n🚀 启动 ETF 日 K 线 MySQL 沉淀任务")
+    print("\n🚀 启动 ETF 日 K 线本地库沉淀任务")
     print(f"📌 同步模式: {mode_desc}")
     print(f"🎯 标的数量: {total} 只")
     print(f"⚡ 并发线程: {args.workers}")

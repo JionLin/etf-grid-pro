@@ -2,6 +2,7 @@ import pytest
 from backend.repositories.etf_pool_repository import ETFPoolRepository
 from backend.repositories.mysql_connection import TEST_DATABASE
 from backend.repositories.mysql_schema import reset_business_tables
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestETFPoolRepository:
@@ -9,6 +10,7 @@ class TestETFPoolRepository:
 
     @pytest.fixture
     def temp_repo(self):
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         yield ETFPoolRepository(database=TEST_DATABASE)
 
@@ -84,6 +86,42 @@ class TestETFPoolRepository:
         assert "511360" not in codes
         assert all_items[0]["etf_code"] == "510300"  # 按月均成交额降序
         assert all_items[0]["amount_ma20_10k"] == 92000.0
+
+        temp_repo.save_pool([
+            {
+                "etf_code": "518880",
+                "name": "黄金ETF",
+                "sector": "大宗商品",
+                "is_t0": True,
+                "amount_10k": 8000.0,
+                "amount_ma20_10k": 8000.0,
+                "atr_pct": 1.2,
+                "elasticity": "低波防守",
+                "score": 70.0,
+            },
+            {
+                "etf_code": "512010",
+                "name": "医药ETF",
+                "sector": "医药健康",
+                "is_t0": False,
+                "amount_10k": 8000.0,
+                "amount_ma20_10k": 8000.0,
+                "atr_pct": 1.2,
+                "elasticity": "低波防守",
+                "score": 70.0,
+            },
+        ])
+        strict = {item["etf_code"] for item in temp_repo.get_pool(min_ma20_amount_10k=3000.0, min_atr_pct=1.5)}
+        assert "518880" not in strict
+        assert "512010" not in strict
+        widened = {item["etf_code"] for item in temp_repo.get_pool(min_ma20_amount_10k=3000.0, min_atr_pct=1.0)}
+        assert "518880" in widened and "512010" in widened
+        exempt = {
+            item["etf_code"]
+            for item in temp_repo.get_pool(min_ma20_amount_10k=3000.0, min_atr_pct=1.5, commodity_exempt=True)
+        }
+        assert "518880" in exempt
+        assert "512010" not in exempt
 
         # 2. 筛选 T+0 标的
         t0_items = temp_repo.get_pool(is_t0=True)

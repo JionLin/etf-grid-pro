@@ -43,3 +43,68 @@ export function aggregateSectorCounts(items) {
   return map;
 }
 
+export function maturityCounts(items) {
+  const list = items || [];
+  return {
+    y5: list.filter((item) => item.is_valid_5y).length,
+    y3: list.filter((item) => item.is_valid_3y).length,
+    all: list.length,
+  };
+}
+
+export function rankPoolItems(items) {
+  const cash = [];
+  const spread = [];
+  (items || []).forEach((item) => {
+    if (item && item.score_kind === "cash_yield") {
+      cash.push(item);
+    } else {
+      spread.push(item);
+    }
+  });
+  const byScore = (left, right) => Number(right.score || 0) - Number(left.score || 0);
+  cash.sort(byScore);
+  spread.sort(byScore);
+  return cash.concat(spread);
+}
+
+export function rankBadge(item) {
+  if (!item || item.score === undefined || item.score === null || item.score === "") {
+    return "";
+  }
+  const drawdown = item.max_drawdown === undefined || item.max_drawdown === null
+    ? ""
+    : ` · 回撤 ${item.max_drawdown}%`;
+  if (item.score_kind === "cash_yield") {
+    return `年化做T ${item.score}%${drawdown}`;
+  }
+  return `价差分 ${item.score}${drawdown}`;
+}
+
+export function poolAtrParams(minAtr, commodityExempt) {
+  const floor = String(minAtr) === "1.0" ? "1.0" : "1.5";
+  return {
+    min_atr: floor,
+    commodity_exempt: commodityExempt ? "1" : "0",
+  };
+}
+
+export function atrFloorLabel(minAtr, commodityExempt) {
+  const floor = String(minAtr) === "1.0" ? "1.0%" : "1.5%";
+  return commodityExempt ? `波幅门槛 ${floor}，黄金/大宗商品按 1.0% 豁免` : `波幅门槛 ${floor}`;
+}
+
+export function storageBadge(label) {
+  if (label === "本机 SQLite" || label === "本机 MySQL") {
+    return `${label} 直出`;
+  }
+  return "本地数据库直出";
+}
+
+export function backfillHint(backfilling, count) {
+  if (backfilling && !count) {
+    return "正在回补日K，完成后会自动出现标的";
+  }
+  return "";
+}
+

@@ -134,8 +134,6 @@ class CapitalPreset:
             CapitalPreset(300000, '30万', False),
             CapitalPreset(500000, '50万', True),
             CapitalPreset(800000, '80万', False),
-            CapitalPreset(1000000, '100万', True),
-            CapitalPreset(1500000, '150万', False),
-            CapitalPreset(2000000, '200万', False)
+            CapitalPreset(1000000, '100万', True)
         ]
         return [preset.to_dict() for preset in presets]

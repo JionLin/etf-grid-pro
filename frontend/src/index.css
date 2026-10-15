@@ -12,6 +12,13 @@
       sans-serif;
     background-color: #f8fafc;
   }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-color: #030712;
+      color: #e5e7eb;
+    }
+  }
 }
 
 @layer components {

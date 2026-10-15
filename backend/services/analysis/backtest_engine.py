@@ -12,6 +12,29 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def closed_loop_trades(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        trade for trade in trades or []
+        if trade.get("action") == "SELL" and trade.get("slot_type") == "BUY_GRID"
+    ]
+
+
+def closed_loop_win_rate(trades: List[Dict[str, Any]]) -> Optional[float]:
+    """闭环胜率：先买后卖、扣完双边费用后仍盈利的笔数 / 闭环笔数。底仓高抛不算闭环。"""
+    closed = closed_loop_trades(trades)
+    if not closed:
+        return None
+    wins = sum(1 for trade in closed if float(trade.get("profit") or 0) > 0)
+    return round(wins / len(closed) * 100, 1)
+
+
+def annualized_cash_yield_pct(grid_cash_profit: float, initial_capital: float, calendar_days: int) -> Optional[float]:
+    """年化做T：差价现金利润 / 本金，按日历日折到一年，单位是百分数。"""
+    if not initial_capital or calendar_days is None or int(calendar_days) <= 0:
+        return None
+    return round(float(grid_cash_profit) / float(initial_capital) * 365.0 / int(calendar_days) * 100, 2)
+
+
 def calculate_sortino_ratio(
     equity_curve: List[Dict[str, Any]], rf: float = 0.02, periods: int = 250
 ) -> Optional[float]:
@@ -190,7 +213,7 @@ class GridSlot:
     """网格配对槽位数据模型"""
     slot_id: str                # 槽位唯一标识 (如 small_buy_1, medium_sell_2)
     rail: str                   # 轨道代号 (small, medium, large)
-    rail_name: str              # 轨道中文名 (小网 (高频做T), 中网 (波段巡航), 大网 (估值防守))
+    rail_name: str              # 轨道中文名 (小网 (高频做T), 中网 (波段巡航), 大网 (深档防守))
     tag: str                    # 轨道短标签 (小网, 中网, 大网)
     slot_type: str              # 槽位类型: 'BUY_GRID' (向下吸筹对冲) 或 'SELL_GRID' (向上高抛对冲)
     level: int                  # 档位序号 (1 ~ 5)
@@ -396,7 +419,7 @@ class GridBacktestEngine:
         rail_stats = {
             "small": {"name": "小网 (高频做T)", "tag": "小网", "trades_count": 0, "profit": 0.0},
             "medium": {"name": "中网 (波段巡航)", "tag": "中网", "trades_count": 0, "profit": 0.0},
-            "large": {"name": "大网 (估值防守)", "tag": "大网", "trades_count": 0, "profit": 0.0},
+            "large": {"name": "大网 (深档防守)", "tag": "大网", "trades_count": 0, "profit": 0.0},
         }
 
         # 最大回撤从首个净值点起算（peak 初始为 0，而非初始本金，避免首日建仓浮亏被误计入回撤）
@@ -534,6 +557,10 @@ class GridBacktestEngine:
             active_buy_slots.sort(key=lambda x: x.buy_price, reverse=True)
 
             for slot in active_buy_slots:
+                # 日 K 只有高低点，同一档当天先卖后买会把一根 K 线当成两笔确定成交。
+                if slot.sell_date == date_str:
+                    continue
+
                 shares_to_buy = slot.shares
                 buy_cost = round(shares_to_buy * slot.buy_price, 2)
                 fee = self.calculate_commission(buy_cost)
@@ -636,13 +663,13 @@ class GridBacktestEngine:
         buy_count = sum(1 for t in trades if t["action"] == "BUY")
         total_trades_count = len(trades)
         paired_count = min(sell_count, buy_count)
-        winning_sells = sum(
-            1 for t in trades if t["action"] == "SELL" and float(t.get("profit") or 0) > 0
-        )
-        win_rate = round(winning_sells / sell_count * 100, 1) if sell_count > 0 else None
+        win_rate = closed_loop_win_rate(trades)
+        closed_count = len(closed_loop_trades(trades))
 
         # 网格做 T 纯差价落袋利润总额
         grid_cash_profit = sum(t.get("profit", 0.0) for t in trades if t["action"] == "SELL")
+        calendar_span = max(int((pd.to_datetime(df.iloc[-1][date_col]) - pd.to_datetime(df.iloc[0][date_col])).days), 1)
+        cash_yield_pct = annualized_cash_yield_pct(grid_cash_profit, initial_capital, calendar_span)
 
         # 未闭环高抛利润统计：SELL_GRID 卖出后从未按设计回调价买回时，该笔利润为预估未实现
         unclosed_profit = 0.0
@@ -699,6 +726,8 @@ class GridBacktestEngine:
                 "max_exposure": exposure_stats["max_exposure"],
                 "top_drawdown_spells": spell_stats["top_drawdown_spells"],
                 "win_rate": win_rate,
+                "closed_loop_count": closed_count,
+                "cash_yield_pct": cash_yield_pct,
                 "total_trades_count": total_trades_count,
                 "sell_trades_count": sell_count,
                 "buy_trades_count": buy_count,

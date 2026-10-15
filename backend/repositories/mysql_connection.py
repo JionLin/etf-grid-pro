@@ -1,16 +1,17 @@
-"""本机 MySQL 连接。账号只来自环境变量，失败时不得回退到 SQLite。"""
+"""数据库连接。DB_TYPE=sqlite 时打开 SQLite 文件；DB_TYPE=mysql 时才连接 MySQL。
+
+选了 MySQL 但连不上时直接失败，不会改去打开 SQLite。
+"""
 import os
 from typing import Any, Dict, Optional
 
-import pymysql
 from dotenv import load_dotenv
-from pymysql.cursors import DictCursor
+
+from .db_config import DEFAULT_DATABASE, TEST_DATABASE, db_type, sqlite_path
+from .sqlite_dialect import connect_sqlite
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 load_dotenv(os.path.join(_ROOT, ".env"), override=False)
-
-DEFAULT_DATABASE = "etf_grid"
-TEST_DATABASE = "etf_grid_test"
 
 
 class MysqlConfigError(RuntimeError):
@@ -38,6 +39,9 @@ def read_settings(
         resolved_password = password
     if not resolved_user:
         raise MysqlConfigError("缺少环境变量 MYSQL_USER")
+    import pymysql
+    from pymysql.cursors import DictCursor
+
     resolved_port = port if port is not None else int(os.environ.get("MYSQL_PORT", "3306"))
     return {
         "host": host or os.environ.get("MYSQL_HOST", "127.0.0.1"),
@@ -58,8 +62,12 @@ def connect(
     password: Optional[str] = None,
     host: Optional[str] = None,
     port: Optional[int] = None,
-) -> pymysql.connections.Connection:
-    """打开连接并固定会话字符集与东八区。连接失败直接抛出。"""
+):
+    """按 DB_TYPE 打开连接。MySQL 固定 utf8mb4 和东八区，失败直接抛出。"""
+    if db_type() == "sqlite":
+        return connect_sqlite(sqlite_path(database))
+    import pymysql
+
     settings = read_settings(
         database, user=user, password=password, host=host, port=port
     )
@@ -82,8 +90,12 @@ def connect_server(
     *,
     user: Optional[str] = None,
     password: Optional[str] = None,
-) -> pymysql.connections.Connection:
-    """连到实例本身，用于建库。不选择业务库。"""
+):
+    """连到 MySQL 实例本身，用于建库。不选择业务库。"""
+    if db_type() == "sqlite":
+        return connect_sqlite(sqlite_path(DEFAULT_DATABASE))
+    import pymysql
+
     settings = read_settings(user=user, password=password)
     settings.pop("database")
     try:

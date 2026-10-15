@@ -5,7 +5,22 @@ import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
-from .cache_service import EnhancedCache
+from .bar_metrics import (
+    INSUFFICIENT_DATA_LABEL,
+    drop_unfinished_session_bar,
+    measure_local_metrics,
+    pool_rank_score,
+)
+from .trading_calendar import load_trading_year
+from .market_clock import (
+    SHANGHAI,
+    as_shanghai,
+    gap_is_only_non_trading,
+    quote_date_label as shanghai_quote_date,
+    spot_quote_unusable,
+)
+from .t0_rules import is_t0_instrument
+from .cache_service import EnhancedCache, resolve_akshare_cache_dir
 try:
     from repositories.market_data_repository import MarketDataRepository
     from repositories.etf_pool_repository import ETFPoolRepository, UNCLASSIFIED_SECTOR
@@ -16,15 +31,74 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 SPOT_QUOTE_TTL_SECONDS = 45
+SINA_CATEGORY_TIMEOUT_SECONDS = 10
+EASTMONEY_FAILURE_LIMIT = 2
+POOL_REBUILD_COOLDOWN_SECONDS = 600
+_eastmoney_lock = threading.Lock()
+_eastmoney_failures = 0
+_eastmoney_open = False
+
+
+def eastmoney_circuit_open() -> bool:
+    """东财连续失败后，本进程剩余请求直接走腾讯。"""
+    return _eastmoney_open
+
+
+def note_eastmoney_success() -> None:
+    global _eastmoney_failures
+    with _eastmoney_lock:
+        if not _eastmoney_open:
+            _eastmoney_failures = 0
+
+
+def note_eastmoney_failure() -> None:
+    global _eastmoney_failures, _eastmoney_open
+    with _eastmoney_lock:
+        _eastmoney_failures += 1
+        if _eastmoney_failures >= EASTMONEY_FAILURE_LIMIT and not _eastmoney_open:
+            _eastmoney_open = True
+            logger.warning(
+                "东方财富连续失败 %s 次，本进程日K和行情改走腾讯",
+                _eastmoney_failures,
+            )
+
+
+def reset_eastmoney_circuit() -> None:
+    """测试隔离。运行中的进程不主动闭合熔断。"""
+    global _eastmoney_failures, _eastmoney_open
+    with _eastmoney_lock:
+        _eastmoney_failures = 0
+        _eastmoney_open = False
+
+
+_SINA_CATEGORY_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/jsonp.php/"
+    "IO.XSRV2.CallbackList['da_yPT46_Ll7K6WD']/Market_Center.getHQNodeDataSimple"
+)
+_SINA_CATEGORY_COLUMNS = [
+    "代码",
+    "名称",
+    "最新价",
+    "涨跌额",
+    "涨跌幅",
+    "买入",
+    "卖出",
+    "昨收",
+    "今开",
+    "最高",
+    "最低",
+    "成交量",
+    "成交额",
+]
 
 
 class AkShareClient:
     """AkShare数据客户端 - 与TushareClient接口完全兼容"""
     
-    def __init__(self, cache_dir: str = "../cache/akshare"):
+    def __init__(self, cache_dir: Optional[str] = None):
         """初始化AkShare客户端"""
         # 初始化缓存管理器（保持与TushareClient相同的逻辑）
-        self.cache = EnhancedCache(cache_dir)
+        self.cache = EnhancedCache(resolve_akshare_cache_dir(cache_dir))
         self.market_repo = MarketDataRepository()
         self.pool_repo = ETFPoolRepository()
         
@@ -35,6 +109,7 @@ class AkShareClient:
         self._spot_frame = None
         self._spot_fetched_at = 0.0
         self._quote_cache: Dict[str, tuple] = {}
+        self._pool_rebuild_at = 0.0
         
         logger.info("AkShare客户端初始化成功（集成 SQLite 时序行情湖版本）")
 
@@ -56,33 +131,45 @@ class AkShareClient:
 
     def _load_spot_frame(self) -> pd.DataFrame:
         """全市场现货表 45 秒内只拉一次，单代码查询共用这一份。"""
+        if eastmoney_circuit_open():
+            raise RuntimeError("东方财富熔断已打开，跳过全市场现货")
         now = time.monotonic()
         with self._spot_lock:
             if self._spot_frame is not None and now - self._spot_fetched_at < SPOT_QUOTE_TTL_SECONDS:
                 return self._spot_frame
-        frame = ak.fund_etf_spot_em()
+        try:
+            frame = ak.fund_etf_spot_em()
+        except Exception:
+            note_eastmoney_failure()
+            raise
+        note_eastmoney_success()
         with self._spot_lock:
             self._spot_frame = frame
             self._spot_fetched_at = time.monotonic()
         return frame
     
     def _fetch_raw_kline_network(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
-        """向网络接口请求原始日 K 线（优先 AkShare，网络受阻时走备用分段源）"""
+        """向网络接口请求原始日 K 线。东财连续失败后，本进程直接走腾讯。"""
         clean_code = etf_code.split(".")[0]
         s_date = start_date.replace("-", "")
         e_date = end_date.replace("-", "")
-        try:
-            df = ak.fund_etf_hist_em(
-                symbol=clean_code,
-                period="daily",
-                start_date=s_date,
-                end_date=e_date,
-                adjust="qfq"
-            )
-            if df is not None and not df.empty:
-                return self._convert_akshare_daily_to_tushare_format(df)
-        except Exception as e:
-            logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
+        if eastmoney_circuit_open():
+            logger.info("东方财富熔断已打开，日K直接走腾讯 (%s)", clean_code)
+        else:
+            try:
+                df = ak.fund_etf_hist_em(
+                    symbol=clean_code,
+                    period="daily",
+                    start_date=s_date,
+                    end_date=e_date,
+                    adjust="qfq"
+                )
+                if df is not None and not df.empty:
+                    note_eastmoney_success()
+                    return self._convert_akshare_daily_to_tushare_format(df)
+            except Exception as e:
+                note_eastmoney_failure()
+                logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
 
         return self._get_fallback_kline(clean_code, days=days, start_date=start_date, end_date=end_date)
 
@@ -94,6 +181,7 @@ class AkShareClient:
         3. 从本地 SQLite 直出切片
         """
         clean_code = etf_code.split(".")[0]
+        self.market_repo.delete_preclose_session_bars(etf_code=clean_code)
         norm_start = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}" if len(start_date) == 8 else start_date
         norm_end = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}" if len(end_date) == 8 else end_date
         est_target_days = int(days * 242 / 365) if days > 30 else days
@@ -111,10 +199,12 @@ class AkShareClient:
                 self.market_repo.save_bars(clean_code, df)
             return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end)
 
-        # 场景 B: 最新端缺口比对 (local_max < norm_end)
-        gap_days = (datetime.strptime(norm_end, "%Y-%m-%d") - datetime.strptime(local_max, "%Y-%m-%d")).days
-        is_weekend = datetime.strptime(norm_end, "%Y-%m-%d").weekday() >= 5
-        if local_max < norm_end and not (is_weekend and gap_days <= 3):
+        # 场景 B: 最新端缺口比对。纯休市缺口不补，中间夹着交易日必须补。
+        if local_max < norm_end and not self.gap_is_only_weekend(
+            local_max,
+            norm_end,
+            self.cached_trading_days(),
+        ):
             try:
                 next_day = (datetime.strptime(local_max, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
                 target_end = end_date.replace("-", "")
@@ -253,8 +343,10 @@ class AkShareClient:
         # 1. 获取最近收盘的交易日
         latest_trading_date = self.get_latest_trading_date()
         
-        # 2. 检查该交易日的缓存
-        cached_data = self.cache.get_daily_cache(latest_trading_date, "price", etf_code)
+        # 2. 仅在已收盘时读取交易日缓存。盘中缓存是上一笔快照，不能当成最新价。
+        cached_data = None
+        if self._day_cache_is_closed(latest_trading_date):
+            cached_data = self.cache.get_daily_cache(latest_trading_date, "price", etf_code)
         if cached_data:
             logger.info(f"✓ 从交易日缓存获取ETF {etf_code} 最新价格 (交易日: {latest_trading_date})")
             self._remember_quote(etf_code, cached_data)
@@ -369,8 +461,8 @@ class AkShareClient:
             }
             
             # 4. 检查是否需要缓存（如果是当日数据且还未收盘，则不缓存）
-            current_date = datetime.now().strftime('%Y%m%d')
-            if actual_trading_date == current_date and not self._is_market_closed(datetime.now()):
+            current_date = as_shanghai(datetime.now(SHANGHAI)).strftime('%Y%m%d')
+            if actual_trading_date == current_date and not self._is_market_closed(datetime.now(SHANGHAI)):
                 logger.info(f"→ 当日数据且未收盘，跳过缓存 (交易日: {actual_trading_date})")
             else:
                 self.cache.set_daily_cache(actual_trading_date, "price", etf_code, price_info)
@@ -383,16 +475,31 @@ class AkShareClient:
             logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 最新价格获取失败: {str(e)}")
             fallback = self._get_fallback_quote(etf_code)
             if fallback:
-                self.cache.set_daily_cache(latest_trading_date, "price", etf_code, fallback)
+                if self._day_cache_is_closed(latest_trading_date):
+                    self.cache.set_daily_cache(latest_trading_date, "price", etf_code, fallback)
+                else:
+                    logger.info("备用行情尚未收盘，不写入交易日缓存: %s", etf_code)
                 self._remember_quote(etf_code, fallback)
                 logger.info(f"✓ 通过备用行情源获取ETF {etf_code} 最新价格成功")
                 return fallback
             return None
 
+    def _day_cache_is_closed(self, trading_date: str, now: Optional[datetime] = None) -> bool:
+        """当天未到 15:00 时，交易日缓存既不能读也不能当收盘价写入。"""
+        current = as_shanghai(now) if now is not None else as_shanghai(datetime.now(SHANGHAI))
+        if str(trading_date) == current.strftime("%Y%m%d") and not self._is_market_closed(current):
+            return False
+        return True
+
+    @staticmethod
+    def quote_date_label(now: datetime, trading_days: Optional[List[str]] = None) -> str:
+        """行情所属交易日。开盘前、周末和日历里的休市日沿用上一交易日。"""
+        return shanghai_quote_date(now, trading_days)
+
     def sync_window_history(self, etf_code: str, window_days: int = 1825) -> pd.DataFrame:
         """按协议窗口增量补齐本地日 K。覆盖够时不打 HTTP。"""
         safe_days = max(30, int(window_days))
-        end = datetime.now()
+        end = as_shanghai(datetime.now(SHANGHAI)).replace(tzinfo=None)
         start = end - timedelta(days=safe_days)
         frame = self._sync_and_fill_kline_lake(
             etf_code,
@@ -491,7 +598,7 @@ class AkShareClient:
         Returns:
             str: 最近的交易日 (YYYYMMDD格式)
         """
-        current_time = datetime.now()
+        current_time = as_shanghai(datetime.now(SHANGHAI))
         current_date = current_time.strftime('%Y%m%d')
         
         # 获取当前年份的交易日历
@@ -591,7 +698,7 @@ class AkShareClient:
         try:
             # 获取当前日期和时间
             if current_time is None:
-                current_time = datetime.now()
+                current_time = as_shanghai(datetime.now(SHANGHAI))
             current_date = current_time.strftime('%Y%m%d')
             
             # 如果结束日期不是当天，不需要调整
@@ -698,31 +805,20 @@ class AkShareClient:
             List[str]: 交易日列表
         """
         try:
-            # 先检查缓存
-            cached_calendar = self.cache.get_permanent_cache("trading_cal", str(year))
-            if cached_calendar:
-                return cached_calendar
-            
-            # 调用AkShare交易日历接口
-            df = ak.tool_trade_date_hist_sina()
-            
-            if df.empty:
-                logger.warning(f"✗ AkShare交易日历接口返回空数据")
-                return []
-            
-            # 处理日期格式
-            df['trade_date'] = df['trade_date'].astype(str).str.replace('-', '')
-            
-            # 筛选年份
-            year_filter = df['trade_date'].str.startswith(str(year))
-            year_data = df[year_filter]['trade_date'].tolist()
-            
-            # 缓存结果
-            self.cache.set_permanent_cache("trading_cal", str(year), year_data)
-            
-            logger.info(f"✓ 从AkShare获取{year}年交易日历成功，共{len(year_data)}个交易日")
+            def fetch_year(target_year: int) -> List[str]:
+                df = ak.tool_trade_date_hist_sina()
+                if df.empty:
+                    logger.warning("✗ AkShare交易日历接口返回空数据")
+                    return []
+                df["trade_date"] = df["trade_date"].astype(str).str.replace("-", "")
+                year_filter = df["trade_date"].str.startswith(str(target_year))
+                return df[year_filter]["trade_date"].tolist()
+
+            year_data = load_trading_year(self.cache, year, fetch_year)
+            if year_data:
+                logger.info(f"✓ 从AkShare获取{year}年交易日历成功，共{len(year_data)}个交易日")
             return year_data
-            
+
         except Exception as e:
             logger.error(f"✗ 从AkShare获取{year}年交易日历失败: {str(e)}")
             return []
@@ -770,34 +866,42 @@ class AkShareClient:
             import requests
             code = etf_code.split('.')[0]
             prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
-            resp = requests.get(f'http://qt.gtimg.cn/q={prefix}{code}', timeout=5)
+            resp = requests.get(f'https://qt.gtimg.cn/q={prefix}{code}', timeout=5)
             resp.encoding = 'gbk'
             if '~' not in resp.text:
                 return None
             parts = resp.text.split('~')
             if len(parts) < 45:
                 return None
-            return {
-                'name': parts[1],
-                'etf_name': parts[1],
-                'current_price': float(parts[3]),
-                'pre_close': float(parts[4]),
-                'open_price': float(parts[5]),
-                'high_price': float(parts[33]),
-                'low_price': float(parts[34]),
-                'change_amount': float(parts[31]),
-                'pct_change': float(parts[32]),
-                'amplitude': float(parts[43]),
-                'volume': int(float(parts[6])),
-                'amount': float(parts[37]) * 10000,
-                'turnover_rate': float(parts[38]) if parts[38] else 0.0,
-                'volume_ratio': 1.0,
-                'iopv': float(parts[3]),
-                'trading_date': self.get_latest_trading_date()
-            }
+            return self._quote_from_tencent_parts(parts, datetime.now(SHANGHAI))
         except Exception as e:
             logger.warning(f"备用行情获取失败: {str(e)}")
             return None
+
+    def _quote_from_tencent_parts(self, parts: list, moment: datetime) -> Dict[str, Any]:
+        """腾讯行情没有交易日字段。锚点日期用上海时间，盘前和休市日回到上一交易日。"""
+        now = as_shanghai(moment)
+        trade_day = self.quote_date_label(now, self.cached_trading_days(now)).replace("-", "")
+        return {
+            'name': parts[1],
+            'etf_name': parts[1],
+            'current_price': float(parts[3]),
+            'pre_close': float(parts[4]),
+            'open_price': float(parts[5]),
+            'high_price': float(parts[33]),
+            'low_price': float(parts[34]),
+            'change_amount': float(parts[31]),
+            'pct_change': float(parts[32]),
+            'amplitude': float(parts[43]),
+            'volume': int(float(parts[6])),
+            'amount': float(parts[37]) * 10000,
+            'turnover_rate': float(parts[38]) if parts[38] else 0.0,
+            'volume_ratio': 1.0,
+            'iopv': float(parts[3]),
+            'timestamp': now.strftime('%Y-%m-%d %H:%M:%S'),
+            'trade_date': trade_day,
+            'trading_date': trade_day,
+        }
 
     def _normalize_calendar_date(self, value: Optional[str]) -> Optional[str]:
         """把 YYYYMMDD 或 YYYY-MM-DD 归一成 YYYY-MM-DD。"""
@@ -892,10 +996,9 @@ class AkShareClient:
                     'low': l_price,
                     'vol': vol_val,
                     'amount': calc_amount,
-                    'pct_chg': round((c_price - o_price) / o_price * 100, 2) if o_price > 0 else 0.0
                 })
-            df = pd.DataFrame(records)
-            return df.sort_values('trade_date').reset_index(drop=True)
+            records = self.pct_change_versus_previous_close(records)
+            return pd.DataFrame(records).reset_index(drop=True)
         except Exception as e:
             logger.warning(f"备用K线获取失败: {str(e)}")
             return None
@@ -914,70 +1017,322 @@ class AkShareClient:
                 'elasticity': None,
             }
 
-        is_t0 = any(k in name for k in [
-            '债', '短融', '存单', '黄金', '豆粕', '能源化工', '白银', '有色期货',
-            '金ETF', '上海金', '恒生', '港股', '纳斯达克', '纳指', '标普', '日经',
-            '德国', '法国', '美股', '海外', '中概', '亚太', '道琼斯', '巴西', '日本东证',
-        ])
+        is_t0 = is_t0_instrument(code, name)
 
         if any(k in name for k in ['债', '短融', '存单']):
-            sector, base_atr = '债券与固收', 0.4
+            sector = '债券与固收'
         elif any(k in name for k in ['黄金', '豆粕', '能源化工', '白银', '有色期货', '金ETF', '上海金']):
-            sector, base_atr = '大宗商品', 1.6
+            sector = '大宗商品'
         elif any(k in name for k in [
             '恒生', '港股', '纳斯达克', '纳指', '标普', '日经', '德国', '法国',
             '中概', '亚太', '道琼斯', '巴西', '日本东证',
         ]):
-            sector, base_atr = '跨境全球', 2.8
+            sector = '跨境全球'
         elif any(k in name for k in [
             '半导体', '芯片', '电子', '计算机', '软件', '通信', '人工智能', 'AI',
             '信创', '大数据', '传媒', '游戏', '物联网', '机器人', '卫星', '云计算',
             '集成电路', '科技ETF', '5G', '影视',
         ]):
-            sector, base_atr = '科技芯片', 3.4
+            sector = '科技芯片'
         elif any(k in name for k in [
             '光伏', '新能源', '电池', '锂电', '风电', '储能', '汽车', '智能网联',
             '机械', '装备', '工业母机', '机床', '电网设备', '船舶',
         ]):
-            sector, base_atr = '新能源制造', 2.7
+            sector = '新能源制造'
         elif any(k in name for k in ['医药', '医疗', '创新药', '中药', '生物', '疫苗']):
-            sector, base_atr = '医药健康', 2.2
+            sector = '医药健康'
         elif any(k in name for k in ['证券', '券商', '银行', '保险', '地产', '金融科技', '金融ETF']):
-            sector, base_atr = '大金融', 2.1
+            sector = '大金融'
         elif any(k in name for k in ['消费', '白酒', '酒', '食品', '饮料', '家电', '农业', '养殖', '畜牧', '旅游', '粮食']):
-            sector, base_atr = '大消费', 2.0
+            sector = '大消费'
         elif any(k in name for k in [
             '煤炭', '钢铁', '有色', '化工', '稀土', '金属', '油气', '能源', '资源',
             '石油', '石化', '矿业', '建材',
         ]):
-            sector, base_atr = '周期资源', 2.4
+            sector = '周期资源'
         elif any(k in name for k in ['电力', '绿电', '公用', '基建', '水务', '红利', '高股息', '低波']):
-            sector, base_atr = '公用红利', 1.5
+            sector = '公用红利'
         elif any(k in name for k in ['军工', '航天', '国防', '航空']):
-            sector, base_atr = '国防军工', 2.6
+            sector = '国防军工'
         elif any(k in name for k in [
             '300', '500', '1000', '2000', '50', '创业板', '科创50', '科创100',
             'A50', 'A500', '中证A', '综指', '上证', '深证', '中证800',
             '科创200', '科创创业', '价值', '成长', '现金流',
         ]):
-            sector, base_atr = '核心宽基', 1.9
+            sector = '核心宽基'
         else:
-            sector, base_atr = UNCLASSIFIED_SECTOR, 2.0
-
-        if base_atr >= 3.0:
-            elasticity = '高弹性'
-        elif base_atr >= 2.0:
-            elasticity = '稳健型'
-        else:
-            elasticity = '低波防守'
+            sector = UNCLASSIFIED_SECTOR
 
         return {
             'excluded': False,
             'sector': sector,
             'is_t0': is_t0,
-            'atr_pct': base_atr,
-            'elasticity': elasticity,
+            'atr_pct': None,
+            'elasticity': INSUFFICIENT_DATA_LABEL,
+            'metrics_status': INSUFFICIENT_DATA_LABEL,
         }
+
+    def cached_trading_days(self, moment: Optional[datetime] = None) -> Optional[List[str]]:
+        """只读已落盘的交易日历，不在行情路径上打网络。"""
+        cache = getattr(self, "cache", None)
+        getter = getattr(cache, "get_permanent_cache", None)
+        if not callable(getter):
+            return None
+        current = as_shanghai(moment)
+        collected: List[str] = []
+        for year in (current.year, current.year - 1):
+            cached = getter("trading_cal", str(year))
+            if isinstance(cached, list):
+                collected.extend(str(day) for day in cached)
+        return collected or None
+
+    @staticmethod
+    def gap_is_only_weekend(
+        local_max: str,
+        target_end: str,
+        trading_days: Optional[List[str]] = None,
+    ) -> bool:
+        """缺口里没有交易日才跳过。没日历时仍只把周六日当休市。"""
+        return gap_is_only_non_trading(local_max, target_end, trading_days)
+
+    @staticmethod
+    def pct_change_versus_previous_close(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """涨跌幅相对前一日收盘。首日没有前收，记 0，不用开盘价代替。"""
+        ordered = sorted(records, key=lambda item: str(item.get("trade_date")))
+        previous_close = None
+        for item in ordered:
+            close_price = float(item.get("close") or 0.0)
+            if previous_close is None or previous_close == 0:
+                item["pct_chg"] = 0.0
+            else:
+                item["pct_chg"] = round((close_price - previous_close) / previous_close * 100, 2)
+            previous_close = close_price
+        return ordered
+
+    def _local_bar_metrics(self, etf_code: str) -> Dict[str, Any]:
+        """读取本地日 K 并计算 ATR 与 20 日均额。读不到就标数据不足。"""
+        frame = None
+        market_repo = getattr(self, "market_repo", None)
+        if market_repo is not None and hasattr(market_repo, "get_bars"):
+            try:
+                frame = market_repo.get_bars(etf_code, limit=60)
+            except Exception as exc:
+                logger.debug("读取本地日 K 失败 %s: %s", etf_code, exc)
+        metrics = measure_local_metrics(frame)
+        metrics["last_bar"] = self._last_bar_from_frame(frame)
+        return metrics
+
+    @staticmethod
+    def extract_spot_quote(row: Dict[str, Any]) -> Optional[tuple]:
+        """从行情行取出代码、最新价、涨跌幅。缺最新价时不用昨收顶替。"""
+        raw_code = str(row.get("代码") or row.get("code") or "")
+        code = raw_code.replace("sh", "").replace("sz", "").strip()
+        if len(code) != 6 or not code.isdigit():
+            return None
+        if row.get("最新价") not in (None, ""):
+            price = row.get("最新价")
+        elif row.get("trade") not in (None, ""):
+            price = row.get("trade")
+        else:
+            return None
+        if row.get("涨跌幅") not in (None, ""):
+            pct = row.get("涨跌幅")
+        elif row.get("changepercent") not in (None, ""):
+            pct = row.get("changepercent")
+        else:
+            pct = 0.0
+        try:
+            price_value = float(price)
+            pct_value = float(pct)
+        except (TypeError, ValueError):
+            return None
+        if price_value != price_value or pct_value != pct_value or price_value <= 0:
+            return None
+        return code, price_value, pct_value
+
+    @staticmethod
+    def _turnover_yuan(row: Dict[str, Any]) -> Optional[float]:
+        """成交额（元）。字段缺失返回 None，0 表示源站给出的零成交。"""
+        if "成交额" not in row and "amount" not in row:
+            return None
+        raw = row["成交额"] if "成交额" in row else row.get("amount")
+        if raw in (None, ""):
+            return None
+        try:
+            amount = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if amount != amount:
+            return None
+        return amount
+
+    def _fetch_sina_category_frame(self) -> pd.DataFrame:
+        """全市场 ETF 列表。超过 10 秒视为失败，调用方改用已落库数据。"""
+        import requests
+        from akshare.utils import demjson
+
+        response = requests.get(
+            _SINA_CATEGORY_URL,
+            params={
+                "page": "1",
+                "num": "5000",
+                "sort": "symbol",
+                "asc": "0",
+                "node": "etf_hq_fund",
+                "[object HTMLDivElement]": "qvvne",
+            },
+            timeout=SINA_CATEGORY_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        text = response.text
+        payload = demjson.decode(text[text.find("([") + 1 : -2])
+        frame = pd.DataFrame(payload)
+        frame.columns = _SINA_CATEGORY_COLUMNS + ["_"] * (
+            max(0, len(frame.columns) - len(_SINA_CATEGORY_COLUMNS))
+        )
+        frame = frame[_SINA_CATEGORY_COLUMNS]
+        for column in ("最新价", "涨跌幅", "成交额", "昨收"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        return frame
+
+    def _load_category_spot_rows(self) -> List[Dict[str, Any]]:
+        """新浪 ETF 分类行情。列名由数据源给出，调用方按最新价读取。"""
+        frame = self._fetch_sina_category_frame()
+        return frame.to_dict(orient="records")
+
+    def _remember_quote_date(self, code: str, quote_date: str) -> None:
+        dates = getattr(self, "_quote_dates", None)
+        if dates is None:
+            dates = {}
+            self._quote_dates = dates
+        dates[str(code)] = quote_date
+
+    def attach_quote_dates(
+        self,
+        items: List[Dict[str, Any]],
+        now: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        """给返回给页面的标的补上行情日。优先用本次回退到的收盘日。"""
+        moment = as_shanghai(now) if now is not None else as_shanghai(datetime.now(SHANGHAI))
+        label = self.quote_date_label(moment, self.cached_trading_days(moment))
+        remembered = getattr(self, "_quote_dates", {}) or {}
+        for item in items:
+            code = str(item.get("etf_code") or "")
+            if not item.get("quote_date"):
+                item["quote_date"] = remembered.get(code) or label
+        return items
+
+    @staticmethod
+    def _last_bar_from_frame(frame: Optional[pd.DataFrame]) -> Optional[Dict[str, Any]]:
+        """本地日 K 最后一根有效收盘。"""
+        if frame is None or frame.empty or "close" not in frame.columns:
+            return None
+        row = frame.iloc[-1]
+        try:
+            close = float(row["close"])
+        except (TypeError, ValueError):
+            return None
+        if close != close or close <= 0:
+            return None
+        trade_date = row["trade_date"] if "trade_date" in frame.columns else ""
+        if hasattr(trade_date, "strftime"):
+            date_text = trade_date.strftime("%Y-%m-%d")
+        else:
+            date_text = str(trade_date)[:10]
+        try:
+            amount_10k = round(float(row["amount"]) / 10000.0, 2)
+        except (TypeError, ValueError, KeyError):
+            amount_10k = 0.0
+        try:
+            pct_change = float(row["pct_chg"]) if "pct_chg" in frame.columns else 0.0
+        except (TypeError, ValueError):
+            pct_change = 0.0
+        if pct_change != pct_change:
+            pct_change = 0.0
+        return {
+            "close": close,
+            "trade_date": date_text,
+            "amount_10k": amount_10k,
+            "pct_change": pct_change,
+        }
+
+    def _overlay_live_quotes(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """用实时最新价覆盖已落库标的。无效行情和拉取失败都保留原快照。"""
+        quote_now = as_shanghai(datetime.now(SHANGHAI))
+        trading_days = self.cached_trading_days(quote_now)
+        quote_date = self.quote_date_label(quote_now, trading_days)
+        try:
+            rows = self._load_category_spot_rows()
+        except Exception as exc:
+            logger.warning("刷新标的池行情失败，继续使用已落库价格: %s", exc)
+            self.attach_quote_dates(records, quote_now)
+            return records
+        quotes: Dict[str, tuple] = {}
+        for row in rows:
+            parsed = self.extract_spot_quote(row)
+            if parsed is None:
+                continue
+            code, price, pct = parsed
+            if spot_quote_unusable(price, self._turnover_yuan(row), quote_now, trading_days):
+                continue
+            quotes[code] = (price, pct)
+        updates = []
+        refreshed: List[Dict[str, Any]] = []
+        for record in records:
+            code = str(record.get("etf_code") or "")
+            quote = quotes.get(code)
+            updated = dict(record)
+            if quote is None:
+                self._keep_stored_or_last_close(updated, code, quote_date, updates)
+                refreshed.append(updated)
+                continue
+            price, pct = quote
+            updated["latest_price"] = price
+            updated["pct_change"] = pct
+            updated["quote_date"] = quote_date
+            self._remember_quote_date(code, quote_date)
+            refreshed.append(updated)
+            updates.append((code, price, pct))
+        if updates:
+            try:
+                self.pool_repo.update_quotes(updates)
+            except Exception as exc:
+                logger.warning("落库最新行情失败: %s", exc)
+        return refreshed
+
+    def _keep_stored_or_last_close(
+        self,
+        updated: Dict[str, Any],
+        code: str,
+        quote_date: str,
+        updates: List[tuple],
+    ) -> None:
+        """不把 0 价写回。已有正价格就留着；没有则用本地最后一根收盘。"""
+        try:
+            stored = float(updated.get("latest_price") or 0.0)
+        except (TypeError, ValueError):
+            stored = 0.0
+        if stored > 0:
+            updated["quote_date"] = quote_date
+            self._remember_quote_date(code, quote_date)
+            return
+        last = (self._local_bar_metrics(code) or {}).get("last_bar") if code else None
+        if not last:
+            updated["quote_date"] = quote_date
+            self._remember_quote_date(code, quote_date)
+            return
+        updated["latest_price"] = last["close"]
+        updated["pct_change"] = last["pct_change"]
+        updated["quote_date"] = last["trade_date"] or quote_date
+        self._remember_quote_date(code, updated["quote_date"])
+        updates.append((code, last["close"], last["pct_change"]))
+
+    def _pool_rebuild_on_cooldown(self) -> bool:
+        """池子不满 20 只时，首页轮询不能每次都重拉全市场列表。"""
+        last = float(getattr(self, "_pool_rebuild_at", 0.0) or 0.0)
+        if last <= 0:
+            return False
+        return (time.monotonic() - last) < POOL_REBUILD_COOLDOWN_SECONDS
 
     def build_or_get_etf_pool(
         self,
@@ -997,28 +1352,47 @@ class AkShareClient:
                 limit=500
             )
             if existing and len(existing) >= 20:
-                logger.info(f"✓ 从本地 SQLite 极速直出做 T 标的池，共 {len(existing)} 只标的")
-                return existing
+                refreshed = self._overlay_live_quotes(existing)
+                logger.info(f"✓ 从本地标的池直出 {len(refreshed)} 只，并覆盖实时最新价")
+                return refreshed
+            if self._pool_rebuild_on_cooldown():
+                logger.info(
+                    "本地标的池不足 20 只，全市场列表仍在冷却期，返回已落库的 %s 只",
+                    len(existing or []),
+                )
+                return self.attach_quote_dates(list(existing or []))
 
+        self._pool_rebuild_at = time.monotonic()
         logger.info("→ 触发全市场做 T 标的池全量构建与三重护城河清洗...")
+        quote_now = as_shanghai(datetime.now(SHANGHAI))
+        trading_days = self.cached_trading_days(quote_now)
         try:
-            df_spot = ak.fund_etf_category_sina(symbol="ETF基金")
+            spot_rows = self._load_category_spot_rows()
             # 过滤未满 3 年次新 ETF 规则
             excluded_code_prefixes = ('1591', '1592', '1593', '551', '563', '5881')
             cleaned_records = []
-            
-            for row in df_spot.to_dict(orient='records'):
-                raw_amt = float(row.get('成交额') or 0.0)
+
+            for row in spot_rows:
+                turnover = self._turnover_yuan(row)
+                raw_amt = 0.0 if turnover is None else turnover
                 amt_10k = raw_amt / 10000.0
-                # 计算近 20 个交易日均成交额 (万元)
-                ma20_amt_10k = round(amt_10k * 0.95, 2)
-
-                # 1. 第一重护城河：稳态流动性近 20 日均成交额 >= 3000 万元
-                if ma20_amt_10k < min_ma20_amount_10k or amt_10k < min_amount_10k:
-                    continue
-
                 raw_code = str(row.get('代码', ''))
                 clean_code = raw_code.replace('sh', '').replace('sz', '')
+                try:
+                    spot_price = float(row.get('最新价') or 0.0)
+                except (TypeError, ValueError):
+                    spot_price = 0.0
+                unusable = spot_quote_unusable(spot_price, turnover, quote_now, trading_days)
+                metrics = self._local_bar_metrics(clean_code)
+                ma20_amt_10k = metrics["amount_ma20_10k"] if metrics["turnover_sufficient"] else None
+                last_bar = metrics.get("last_bar") or {}
+
+                # 1. 近 20 日均成交额必须来自本地日 K。开盘前的 0 成交额不参与过滤。
+                if ma20_amt_10k is None or ma20_amt_10k < min_ma20_amount_10k:
+                    continue
+                if not unusable and amt_10k < min_amount_10k:
+                    continue
+
                 name = str(row.get('名称', ''))
 
                 # 2. 第二重护城河：排除未满 3 年次新标的
@@ -1029,44 +1403,64 @@ class AkShareClient:
                 if classification.get('excluded'):
                     continue
 
-                # 3. 第三重护城河：波动率盈利空间 ATR >= 1.5%（排除死水纯债与短融类）
-                if classification['atr_pct'] < min_atr_pct:
+                # 3. 第三重护城河：14 日 ATR 来自本地日 K。样本不够不借用名称波幅。
+                if not metrics["atr_sufficient"] or metrics["atr_pct"] < min(float(min_atr_pct), 1.0):
                     continue
 
-                p_val = float(row.get('最新价') or 0.0)
-                pct_val = float(row.get('涨跌幅') or 0.0)
+                if unusable:
+                    if not last_bar:
+                        continue
+                    p_val = last_bar["close"]
+                    pct_val = last_bar["pct_change"]
+                    stored_amount = last_bar["amount_10k"]
+                    bar_date = last_bar["trade_date"]
+                else:
+                    p_val = spot_price
+                    try:
+                        pct_val = float(row.get('涨跌幅') or 0.0)
+                    except (TypeError, ValueError):
+                        pct_val = 0.0
+                    stored_amount = round(amt_10k, 2)
+                    bar_date = self.quote_date_label(quote_now, trading_days)
+                if stored_amount <= 0 and last_bar:
+                    stored_amount = last_bar["amount_10k"]
+                if min_amount_10k and stored_amount < min_amount_10k:
+                    continue
+                self._remember_quote_date(clean_code, bar_date)
                 cleaned_records.append({
                     'etf_code': clean_code,
                     'name': name,
                     'sector': classification['sector'],
                     'is_t0': classification['is_t0'],
-                    'list_date': '2023前成熟上市',
+                    'list_date': INSUFFICIENT_DATA_LABEL,
                     'latest_price': p_val,
                     'pct_change': pct_val,
-                    'amount_10k': round(amt_10k, 2),
+                    'amount_10k': stored_amount,
                     'amount_ma20_10k': ma20_amt_10k,
-                    'atr_pct': classification['atr_pct'],
-                    'elasticity': classification['elasticity'],
-                    'score': round(min(98.0, 70.0 + (ma20_amt_10k / 5000.0) * 5 + classification['atr_pct'] * 4), 1)
+                    'atr_pct': metrics['atr_pct'],
+                    'elasticity': metrics['elasticity'],
+                    'metrics_status': 'local_bars',
+                    'score': pool_rank_score(metrics['atr_pct'], ma20_amt_10k)[0]
                 })
 
-            # 4. 持久化落盘本地 SQLite 与 JSON 镜像
             self.pool_repo.save_pool(cleaned_records)
             logger.info(f"✓ 全市场做 T 标的池成功持久化至本地文件，共入库 {len(cleaned_records)} 只高胜率做 T 标的")
-            return self.pool_repo.get_pool(
+            pooled = self.pool_repo.get_pool(
                 min_amount_10k=min_amount_10k,
                 min_ma20_amount_10k=min_ma20_amount_10k,
                 min_atr_pct=min_atr_pct,
                 limit=500
             )
+            return self.attach_quote_dates(pooled, quote_now)
         except Exception as e:
             logger.error(f"构建标的池失败: {e}")
-            return self.pool_repo.get_pool(
+            cached = self.pool_repo.get_pool(
                 min_amount_10k=min_amount_10k,
                 min_ma20_amount_10k=min_ma20_amount_10k,
                 min_atr_pct=min_atr_pct,
                 limit=500
             )
+            return self.attach_quote_dates(cached, quote_now)
 
     def sync_full_history(self, etf_code: str) -> pd.DataFrame:
         """
@@ -1084,9 +1478,9 @@ class AkShareClient:
         # 最多向前拉取 25 次（约 16,000 个交易日，足以覆盖 60 年）
         for _ in range(25):
             if not latest_date:
-                url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,,640,qfq"
+                url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,,640,qfq"
             else:
-                url = f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,{latest_date},640,qfq"
+                url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tencent_code},day,,{latest_date},640,qfq"
 
             try:
                 import requests
@@ -1138,11 +1532,11 @@ class AkShareClient:
                 'low': l_price,
                 'vol': vol_val,
                 'amount': calc_amount,
-                'pct_chg': round((c_price - o_price) / o_price * 100, 2) if o_price > 0 else 0.0
             })
 
-        df = pd.DataFrame(records).sort_values('trade_date').reset_index(drop=True)
-        # 幂等全量落盘至本地 SQLite 时序库
+        records = self.pct_change_versus_previous_close(records)
+        df = drop_unfinished_session_bar(pd.DataFrame(records).reset_index(drop=True))
+        # 幂等全量落盘至本地 SQLite 时序库。返回值与库内一致，不含收盘前的当天 K 线。
         self.market_repo.save_bars(clean_code, df)
         logger.info(f"✓ {clean_code} 上市以来全生命周期共 {len(df)} 根 K 线成功同步并持久化到本地 SQLite！")
         return df

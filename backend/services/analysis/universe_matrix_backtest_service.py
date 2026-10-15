@@ -116,7 +116,7 @@ class UniverseMatrixBacktestService:
             df["date"] = df["trade_date"]
         total_bars = len(df)
 
-        trade_mode = "t0" if ETFConstants.is_t0_etf(clean_code) else "t1"
+        trade_mode = "t0" if ETFConstants.is_t0_etf(clean_code, etf_name) else "t1"
         period_results: Dict[str, Any] = {}
 
         now = datetime.now()
@@ -232,7 +232,7 @@ class UniverseMatrixBacktestService:
                 logger.warning(f"标的 {clean_code} 周期 {key} 回测异常: {e}")
                 period_results[key] = {
                     "is_valid": False,
-                    "reason": f"回测计算异常: {str(e)[:30]}",
+                    "reason": "回测计算异常",
                     "annual_return": None,
                     "total_return": None,
                     "max_drawdown": None,

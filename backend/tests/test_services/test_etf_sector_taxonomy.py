@@ -65,6 +65,8 @@ class TestEtfSectorTaxonomy:
     def test_summary_total_equals_eleven_sectors_and_excludes_cash(self):
         from backend.repositories.mysql_connection import TEST_DATABASE
         from backend.repositories.mysql_schema import reset_business_tables
+        from backend.tests.mysql_gate import skip_without_mysql
+        skip_without_mysql()
         reset_business_tables(TEST_DATABASE)
         repo = ETFPoolRepository(database=TEST_DATABASE)
         repo.save_pool([

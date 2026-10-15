@@ -11,16 +11,12 @@ def run_subsector_seed(
     sync_fn: Callable[[str], Any],
     backtest_fn: Callable[[str, str], Dict[str, Any]],
 ) -> Dict[str, int]:
-    pool_repo.mark_seed_representatives()
-    universe = [
-        {
-            "etf_code": item["etf_code"],
-            "etf_name": item["etf_name"],
-            "sector": item["sector"],
-        }
-        for item in pool_repo.list_seeds()
-    ]
-    return board.run_batch(universe, sync_fn, backtest_fn)
+    return board.run_representatives(
+        pool_repo.list_subsector_members(),
+        sync_fn,
+        backtest_fn,
+        pool_repo,
+    )
 
 
 def seed_universe(pool_repo: ETFPoolRepository) -> List[Dict[str, Any]]:

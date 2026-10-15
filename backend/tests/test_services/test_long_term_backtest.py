@@ -3,12 +3,14 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 from datetime import datetime, timedelta
 from backend.services.analysis.etf_analysis_service import ETFAnalysisService
+from backend.tests.mysql_gate import skip_without_mysql
 
 
 class TestLongTermBacktest(unittest.TestCase):
     """验证长周期回测 (最长5年1825天) 与次新 ETF 自适应机制"""
 
     def setUp(self):
+        skip_without_mysql()
         self.service = ETFAnalysisService()
         self.service.akshare_client = MagicMock()
         self.service.suitability_analyzer = MagicMock()

@@ -16,6 +16,13 @@ from typing import Generator, Any, Dict
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 先切到测试配置，避免收集阶段因为没有真实 TUSHARE_TOKEN 直接失败。
+os.environ.setdefault("ENVIRONMENT", "testing")
+os.environ.setdefault("TUSHARE_TOKEN", "test_token_12345678901234567890123456")
+os.environ.setdefault("DB_TYPE", "sqlite")
+if os.environ.get("DB_TYPE", "sqlite").strip().lower() != "mysql":
+    os.environ.setdefault("SQLITE_PATH", "/tmp/etf-grid-pytest/etf_grid.sqlite")
+
 from backend.config import TestingSettings, get_settings
 from backend.utils.exceptions import exception_factory
 

@@ -9,13 +9,25 @@ from services.analysis.etf_analysis_service import ETFAnalysisService
 from services.analysis.grid_fit_service import (
     GridFitBoardService,
     build_protocol_callbacks,
-    start_background_batch,
+    start_background_representatives,
 )
 from repositories.backtest_repository import BacktestRepository
 from repositories.etf_pool_repository import ETFPoolRepository
+from services.analysis.analysis_days import resolve_analysis_days
+from services.analysis.literature_paths import resolve_eda_literature
 
 # 创建分析蓝图
 analysis_bp = Blueprint('analysis', __name__)
+
+
+def _optional_anchor_float(value):
+    if value in (None, "", "null"):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 or number == 0 else None
 etf_service = ETFAnalysisService()
 backtest_repo = BacktestRepository()
 pool_repo = ETFPoolRepository()
@@ -79,10 +91,8 @@ def analyze_etf_strategy():
                 'error': '调节系数应在0.0-2.0之间'
             }), 400
         
-        # 获取分析周期天数（可选参数，默认180天，支持90/180/365）
-        analysis_days = int(data.get('analysisDays', 180))
-        if analysis_days not in [90, 180, 365]:
-            analysis_days = 180
+        # 支持 90/180/365/1825。名单外返回 400，不再静默退回 180。
+        analysis_days = resolve_analysis_days(data.get('analysisDays', 180))
 
         # 获取逐格加码比例（可选参数，默认0.0，范围0.0-0.20）
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
@@ -182,6 +192,9 @@ def analyze_etf_strategy():
             benchmark_price=benchmark_price,
             eda_step_ratios=eda_step_ratios,
             atr_multipliers=atr_multipliers,
+            anchor_source=str(data.get('anchorSource', data.get('anchor_source', data.get('benchmarkMode', 'market'))) or 'market'),
+            valuation_percentile=_optional_anchor_float(data.get('valuationPercentile', data.get('valuation_percentile'))),
+            dual_ma_price=_optional_anchor_float(data.get('dualMaPrice', data.get('dual_ma_price'))),
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "
@@ -222,6 +235,9 @@ def run_backtest():
         backtest_days = max(30, min(1825, backtest_days))
         adjustment_coefficient = float(data.get('adjustmentCoefficient', 1.0))
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
+        risk_preference = str(data.get('riskPreference', data.get('risk_preference', '均衡')))
+        if risk_preference not in ['低频', '均衡', '高频']:
+            risk_preference = '均衡'
         reinvest_mode = str(data.get('reinvestMode', data.get('reinvest_mode', 'cash')))
         step_mode = str(data.get('stepMode', data.get('step_mode', 'atr')))
         if step_mode not in ['atr', 'fixed_eda']:
@@ -310,6 +326,7 @@ def run_backtest():
             eda_step_ratios=eda_step_ratios,
             custom_base_price=custom_base_price,
             atr_multipliers=atr_multipliers,
+            risk_preference=risk_preference,
         )
 
         # 自动归档至本地 SQLite 回测档案库
@@ -339,7 +356,7 @@ def run_backtest():
         from flask import current_app
         current_app.logger.error(f"策略回测失败: {str(e)}")
         current_app.logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': f"回测计算异常: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '回测计算异常'}), 500
 
 
 @analysis_bp.route('/api/backtest/records', methods=['GET'])
@@ -368,7 +385,10 @@ def get_backtest_records():
         )
         return jsonify({'success': True, 'data': records_data})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"获取回测档案列表失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"获取回测档案列表失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '获取回测档案列表失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/records/<run_id>', methods=['GET'])
@@ -380,7 +400,10 @@ def get_backtest_record_detail(run_id: str):
             return jsonify({'success': False, 'error': '未找到该回测档案'}), 404
         return jsonify({'success': True, 'data': record})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"读取回测明细失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"读取回测明细失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '读取回测明细失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/records/<run_id>', methods=['DELETE'])
@@ -392,7 +415,10 @@ def delete_backtest_record(run_id: str):
             return jsonify({'success': False, 'error': '回测记录不存在或已删除'}), 404
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"删除回测档案失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"删除回测档案失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '删除回测档案失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/distinct-etfs', methods=['GET'])
@@ -402,7 +428,10 @@ def get_distinct_etfs_in_records():
         etfs = backtest_repo.get_distinct_etfs()
         return jsonify({'success': True, 'data': etfs})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"获取标的列表失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"获取标的列表失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '获取标的列表失败'}), 500
 
 
 @analysis_bp.route('/api/grid-fit/board', methods=['GET'])
@@ -416,7 +445,10 @@ def get_grid_fit_board():
         )
         return jsonify({'success': True, 'data': payload})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"读取适合度榜失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"读取适合度榜失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '读取适合度榜失败'}), 500
 
 
 @analysis_bp.route('/api/grid-fit/progress', methods=['GET'])
@@ -433,52 +465,40 @@ def get_grid_fit_progress():
             },
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': f"读取适合度榜进度失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"读取适合度榜进度失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '读取适合度榜进度失败'}), 500
 
 
 @analysis_bp.route('/api/grid-fit/refresh', methods=['POST'])
 def refresh_grid_fit():
     """按锁定协议补行情并写榜。不调用个人档案自动归档。"""
     try:
-        pool_repo.mark_seed_representatives()
-        universe = [
-            {
-                "etf_code": item["etf_code"],
-                "etf_name": item["etf_name"],
-                "sector": item["sector"],
-            }
-            for item in pool_repo.list_seeds()
-        ]
         sync_fn, backtest_fn = build_protocol_callbacks(
             etf_service,
             etf_service.akshare_client,
         )
-        started = start_background_batch(
-            universe,
+        started = start_background_representatives(
+            pool_repo.list_subsector_members(),
             sync_fn,
             backtest_fn,
+            pool_repo,
             grid_fit_service.repo,
         )
         return jsonify({'success': True, 'data': started})
     except Exception as e:
-        return jsonify({'success': False, 'error': f"启动适合度榜补齐失败: {str(e)}"}), 500
+        from flask import current_app
+        current_app.logger.error(f"启动适合度榜补齐失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': '启动适合度榜补齐失败'}), 500
 
 
 @analysis_bp.route('/api/literature/eda-grid', methods=['GET'])
 def get_eda_literature():
     """获取 E大网格实战三篇经典文献"""
     try:
-        import os
-        possible_paths = [
-            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'E大', '网格3篇.md'),
-            os.path.join(os.getcwd(), 'E大', '网格3篇.md'),
-            '/Users/johnny/Desktop/github/etf-grid-design/E大/网格3篇.md',
-        ]
-        file_path = None
-        for p in possible_paths:
-            if os.path.exists(p):
-                file_path = p
-                break
+        file_path = resolve_eda_literature(route_file=__file__)
 
         if not file_path:
             return jsonify({'success': False, 'error': '未找到文献文件'}), 404
@@ -515,7 +535,7 @@ def get_eda_literature():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"读取文献失败: {str(e)}")
-        return jsonify({'success': False, 'error': f"读取文献失败: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '读取文献失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/matrix', methods=['GET'])
@@ -550,9 +570,12 @@ def get_universe_backtest_matrix():
 
         sectors = matrix_repo.aggregate_sectors(config_key=config_key, is_default_only=(config_key is None))
 
+        from repositories.db_config import storage_label
+
         payload = {
             'updated_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'total_etfs': res['total'],
+            'storage_label': storage_label(),
             'sectors': sectors,
             'records': res['records'],
         }
@@ -560,7 +583,7 @@ def get_universe_backtest_matrix():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"从 MySQL 获取回测矩阵失败: {str(e)}")
-        return jsonify({'success': False, 'error': f"从 MySQL 获取回测矩阵失败: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '读取本地回测矩阵失败'}), 500
 
 
 @analysis_bp.route('/api/backtest/sectors-ranking', methods=['GET'])
@@ -575,5 +598,5 @@ def get_sectors_ranking():
     except Exception as e:
         from flask import current_app
         current_app.logger.error(f"从 MySQL 获取赛道横评失败: {str(e)}")
-        return jsonify({'success': False, 'error': f"从 MySQL 获取赛道横评失败: {str(e)}"}), 500
+        return jsonify({'success': False, 'error': '读取本地赛道横评失败'}), 500
 

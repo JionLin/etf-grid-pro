@@ -96,6 +96,7 @@ class ETFAnalysisService:
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
+        commodity_exempt: bool = False,
         force_refresh: bool = False
     ) -> Dict[str, Any]:
         """获取全市场做 T ETF 标的池及赛道分布统计（默认月均成交额 >= 3000 万元，ATR >= 1.5%）"""
@@ -119,8 +120,10 @@ class ETFAnalysisService:
             min_amount_10k=min_amount_10k,
             min_ma20_amount_10k=min_ma20_amount_10k,
             min_atr_pct=min_atr_pct,
+            commodity_exempt=commodity_exempt,
             limit=600
         )
+        self.akshare_client.attach_quote_dates(items)
 
         # 补齐多周期回测大宽表沉淀的真实物理上市成熟度 (is_valid_5y, is_valid_3y, is_valid_1y)
         try:
@@ -134,6 +137,11 @@ class ETFAnalysisService:
                 it["is_valid_1y"] = v.get("is_valid_1y", False)
         except Exception as e:
             logger.warning(f"补齐标的成熟度标记失败: {e}")
+
+        self._attach_rank_scores(items)
+        from services.data.bar_metrics import rank_pool_items
+
+        items = rank_pool_items(items)
 
         summary = self.akshare_client.pool_repo.get_sectors_summary(
             min_ma20_amount_10k=min_ma20_amount_10k,
@@ -150,8 +158,53 @@ class ETFAnalysisService:
                 min_ma20_amount_10k=min_ma20_amount_10k,
                 min_atr_pct=min_atr_pct,
             ),
-            "items": items
+            "items": items,
+            "backfilling": self._pool_backfilling(len(items)),
+            "storage_label": self._storage_label(),
         }
+
+    @staticmethod
+    def _storage_label() -> str:
+        try:
+            from repositories.db_config import storage_label
+
+            return storage_label()
+        except Exception:
+            return "本地数据库"
+
+    def _attach_rank_scores(self, items: List[Dict[str, Any]]) -> None:
+        from services.data.bar_metrics import pool_rank_score
+
+        fits: Dict[str, Dict[str, Any]] = {}
+        try:
+            from repositories.grid_fit_repository import GridFitRepository
+            from services.analysis.grid_fit_service import PROTOCOL_VERSION
+
+            for row in GridFitRepository().list_runs(PROTOCOL_VERSION):
+                if row.get("step_mode") != "atr":
+                    continue
+                fits[str(row.get("etf_code"))] = row
+        except Exception as exc:
+            logger.warning("读取适合度年化收益失败: %s", exc)
+        for item in items:
+            fit = fits.get(str(item.get("etf_code")))
+            cash_yield = None
+            if fit and fit.get("status") == "ranked" and fit.get("cash_yield") is not None:
+                cash_yield = fit.get("cash_yield")
+            score, kind = pool_rank_score(item.get("atr_pct"), item.get("amount_ma20_10k"), cash_yield)
+            item["score"] = score
+            item["score_kind"] = kind
+            if fit and fit.get("max_drawdown") is not None:
+                item["max_drawdown"] = fit.get("max_drawdown")
+
+    def _pool_backfilling(self, item_count: int) -> bool:
+        try:
+            from services.data.startup_sync_service import StartupSyncService, pool_is_backfilling
+
+            return pool_is_backfilling(StartupSyncService().get_status(), item_count)
+        except Exception as exc:
+            logger.warning("读取日K回补状态失败: %s", exc)
+            return False
 
     def get_etf_basic_info(self, etf_code: str) -> Dict:
         """
@@ -216,11 +269,22 @@ class ETFAnalysisService:
         return etf_code
 
     def _current_atr_ratio(self, df: pd.DataFrame) -> float:
-        """回测只需要当前 ATR 比率，不跑适宜度全文。"""
+        """窗口最后一根 K 线的 ATR。只给需要最新波动的调用方。"""
         processed = self.atr_analyzer.calculator.calculate_atr(df.copy())
         ratio = processed.iloc[-1].get("atr_ratio")
         if ratio is None or pd.isna(ratio):
             raise ValueError("无法从历史K线计算ATR比率")
+        return float(ratio)
+
+    def _anchor_atr_ratio(self, df: pd.DataFrame) -> float:
+        """锚点当日已经能算出的 ATR。不用窗口末日，避免步长看见未来波动。"""
+        processed = self.atr_analyzer.calculator.calculate_atr(df.copy())
+        ratio = processed.iloc[0].get("atr_ratio")
+        if ratio is None or pd.isna(ratio):
+            valid = processed["atr_ratio"].dropna()
+            if valid.empty:
+                raise ValueError("无法从历史K线计算ATR比率")
+            ratio = valid.iloc[0]
         return float(ratio)
     
     def get_historical_data(self, etf_code: str, days: int = 365) -> pd.DataFrame:
@@ -270,7 +334,10 @@ class ETFAnalysisService:
                            step_mode: str = 'atr',
                            benchmark_price: Optional[float] = None,
                            eda_step_ratios: Optional[Dict[str, float]] = None,
-                           atr_multipliers: Optional[Dict[str, float]] = None) -> Dict:
+                           atr_multipliers: Optional[Dict[str, float]] = None,
+                           anchor_source: str = "market",
+                           valuation_percentile: Optional[float] = None,
+                           dual_ma_price: Optional[float] = None) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -293,13 +360,26 @@ class ETFAnalysisService:
             etf_info = self.get_etf_basic_info(etf_code)
             latest_price_info = {
                 "current_price": etf_info.get("current_price"),
-                "timestamp": etf_info.get("trade_timestamp", ""),
+                "timestamp": etf_info.get("trade_timestamp") or etf_info.get("trade_date") or "",
+                "trade_date": etf_info.get("trade_date") or "",
             }
             if latest_price_info["current_price"] in (None, ""):
                 raise ValueError(f"未获取到ETF最新价格: {etf_code}")
             
             # 2. 获取历史数据（根据指定天数，默认180天）
             df = self.get_historical_data(etf_code, days=analysis_days)
+            from services.analysis.anchor_price import resolve_grid_anchor
+
+            anchor_price, anchor_label = resolve_grid_anchor(
+                anchor_source,
+                live_price=float(latest_price_info["current_price"]),
+                closes=df["close"].tolist() if "close" in df.columns else [],
+                manual_price=benchmark_price,
+                percentile=valuation_percentile,
+                dual_ma_price=dual_ma_price,
+            )
+            if anchor_source in ("percentile", "dual_ma", "manual", "custom"):
+                benchmark_price = anchor_price
             
             # 4. 执行适宜度评估（只看网格体格，不引入估值）
             suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
@@ -322,6 +402,10 @@ class ETFAnalysisService:
                 eda_step_ratios=eda_step_ratios,
                 atr_multipliers=atr_multipliers,
             )
+            grid_params["anchor_label"] = anchor_label
+            grid_params["anchor_source"] = anchor_source
+            grid_params["valuation_percentile"] = valuation_percentile if anchor_source == "percentile" else None
+            grid_params["dual_ma_price"] = dual_ma_price if anchor_source == "dual_ma" else None
             
             # 5. 生成策略分析依据
             strategy_rationale = self._generate_strategy_rationale(
@@ -365,6 +449,12 @@ class ETFAnalysisService:
                     'atrMultipliers': atr_multipliers,
                     'benchmark_price': benchmark_price,
                     'benchmarkPrice': benchmark_price,
+                    'anchor_source': anchor_source,
+                    'anchorSource': anchor_source,
+                    'valuation_percentile': valuation_percentile if anchor_source == "percentile" else None,
+                    'valuationPercentile': valuation_percentile if anchor_source == "percentile" else None,
+                    'dual_ma_price': dual_ma_price if anchor_source == "dual_ma" else None,
+                    'dualMaPrice': dual_ma_price if anchor_source == "dual_ma" else None,
                 }
             }
             
@@ -552,7 +642,8 @@ class ETFAnalysisService:
             # 1. 先行计算大中小三层复合网格阶梯 (以 anchor_price 为中心铺设，尊重 step_mode 与自定义比例)
             composite_steps = self.grid_optimizer.calculate_composite_steps(
                 anchor_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
-                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers
+                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers,
+                risk_preference=risk_preference,
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, anchor_price, composite_steps, base_position_ratio=0.5,
@@ -651,7 +742,7 @@ class ETFAnalysisService:
                 'current_price': current_price,
                 'benchmark_price': anchor_price,
                 'is_custom_benchmark': round(anchor_price, 4) != round(current_price, 4),
-                'price_date': latest_price_info.get('timestamp', ''),  # 价格数据更新时间
+                'price_date': latest_price_info.get('timestamp') or latest_price_info.get('trade_date') or '',
                 'step_mode': step_mode,
                 'price_range': {
                     'lower': round(derived_lower, 3),
@@ -698,6 +789,7 @@ class ETFAnalysisService:
         atr_multipliers: Optional[Dict[str, float]] = None,
         atr_ratio: Optional[float] = None,
         etf_name: Optional[str] = None,
+        risk_preference: str = '均衡',
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -748,12 +840,13 @@ class ETFAnalysisService:
             current_price = float(df.iloc[-1]['close'])
             resolved_name = etf_name or self.resolve_etf_name(etf_code)
             if atr_ratio is None:
-                atr_ratio = self._current_atr_ratio(df)
+                atr_ratio = self._anchor_atr_ratio(df)
 
             # 以当年真实基准价格 backtest_base_price 展开回测网格阶梯
             composite_steps = self.grid_optimizer.calculate_composite_steps(
                 backtest_base_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
-                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers
+                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers,
+                risk_preference=risk_preference,
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, backtest_base_price, composite_steps, base_position_ratio=0.5,
@@ -761,7 +854,7 @@ class ETFAnalysisService:
             )
 
             # 自动识别交易制度
-            trade_mode = "t0" if ETFConstants.is_t0_etf(etf_code) else "t1"
+            trade_mode = "t0" if ETFConstants.is_t0_etf(etf_code, resolved_name) else "t1"
 
             backtest_res = self.backtest_engine.run_backtest(
                 daily_df=df,

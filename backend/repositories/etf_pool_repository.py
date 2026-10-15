@@ -104,6 +104,42 @@ class ETFPoolRepository:
         finally:
             conn.close()
 
+    def update_quotes(self, quotes: List[tuple]) -> int:
+        """按代码更新最新价和涨跌幅。
+
+        Args:
+            quotes: (etf_code, latest_price, pct_change)
+
+        Returns:
+            int: 更新语句影响的行数
+        """
+        if not quotes:
+            return 0
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        payload = [
+            (float(price), float(pct), now_str, str(code))
+            for code, price, pct in quotes
+        ]
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    UPDATE etf_instrument
+                    SET latest_price = %s, pct_change = %s, updated_at = %s
+                    WHERE etf_code = %s
+                    """,
+                    payload,
+                )
+                updated = cursor.rowcount
+            conn.commit()
+            return updated
+        except Exception as exc:
+            logger.error("更新标的池行情失败: %s", exc)
+            raise
+        finally:
+            conn.close()
+
     def _instrument_tuple(self, record: Dict[str, Any], now_str: str) -> tuple:
         sector = record["sector"]
         subsector = record.get("subsector")
@@ -138,11 +174,13 @@ class ETFPoolRepository:
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
+        commodity_exempt: bool = False,
         limit: int = 600,
     ) -> List[Dict[str, Any]]:
         try:
             query, params = self._pool_query(
-                sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20_amount_10k, min_atr_pct, limit
+                sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20_amount_10k, min_atr_pct, limit,
+                commodity_exempt=commodity_exempt,
             )
             conn = self._connect()
             try:
@@ -156,12 +194,29 @@ class ETFPoolRepository:
             logger.error("查询标的池失败: %s", exc)
             return []
 
-    def _pool_query(self, sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20, min_atr, limit):
+    def _pool_query(
+        self,
+        sector,
+        is_t0,
+        elasticity,
+        subsector,
+        min_amount_10k,
+        min_ma20,
+        min_atr,
+        limit,
+        commodity_exempt: bool = False,
+    ):
+        if commodity_exempt:
+            atr_sql = "(atr_pct >= %s OR (sector = %s AND atr_pct >= %s))"
+            atr_params: List[Any] = [min_atr, "大宗商品", min(float(min_atr), 1.0)]
+        else:
+            atr_sql = "atr_pct >= %s"
+            atr_params = [min_atr]
         query = (
             "SELECT * FROM etf_instrument "
-            "WHERE amount_ma20_10k >= %s AND amount_10k >= %s AND atr_pct >= %s"
+            f"WHERE amount_ma20_10k >= %s AND amount_10k >= %s AND {atr_sql}"
         )
-        params: List[Any] = [min_ma20, min_amount_10k, min_atr]
+        params: List[Any] = [min_ma20, min_amount_10k, *atr_params]
         if sector and sector != "全部":
             query += " AND sector = %s"
             params.append(sector)
@@ -407,6 +462,55 @@ class ETFPoolRepository:
         finally:
             conn.close()
 
+    def list_subsector_members(self) -> List[tuple]:
+        """每个小类按 20 日均成交额从高到低列出成员，供代表未过线时顺延。"""
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                placeholders = ",".join(["%s"] * len(SHOPPABLE_SECTORS))
+                cursor.execute(
+                    f"""
+                    SELECT etf_code, name, sector, subsector_code, amount_ma20_10k
+                    FROM etf_instrument
+                    WHERE subsector_code IS NOT NULL AND subsector_code <> ''
+                      AND sector IN ({placeholders})
+                    ORDER BY subsector_code, amount_ma20_10k DESC, etf_code
+                    """,
+                    SHOPPABLE_SECTORS,
+                )
+                grouped: Dict[str, List[Dict[str, Any]]] = {}
+                for row in cursor.fetchall():
+                    grouped.setdefault(row["subsector_code"], []).append({
+                        "etf_code": row["etf_code"],
+                        "etf_name": row["name"],
+                        "sector": row["sector"],
+                        "subsector": row["subsector_code"],
+                        "amount_ma20_10k": row["amount_ma20_10k"],
+                    })
+                return list(grouped.items())
+        finally:
+            conn.close()
+
+    def set_subsector_seed(self, subsector: str, etf_code: str) -> None:
+        """一个小类只保留一只种子。"""
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE etf_instrument SET is_seed = 0 WHERE subsector_code = %s",
+                    (subsector,),
+                )
+                cursor.execute(
+                    """
+                    UPDATE etf_instrument SET is_seed = 1
+                    WHERE etf_code = %s AND subsector_code = %s
+                    """,
+                    (etf_code, subsector),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     def mark_seed_representatives(self) -> List[Dict[str, Any]]:
         """每个有成员的小类只标记流动性最高的一只。"""
         conn = self._connect()
@@ -494,10 +598,16 @@ class ETFPoolRepository:
     def refresh_real_atr_from_bars(self) -> int:
         """基于 etf_daily_bar 中的真实历史 K 线，为 etf_instrument 中的标的重新计算 14 日 Wilder ATR 与弹性等级。"""
         import pandas as pd
-        from algorithms.atr.calculator import ATRCalculator
+        try:
+            from services.data.bar_metrics import FAKE_LIST_DATE, INSUFFICIENT_DATA_LABEL, measure_local_metrics
+        except ImportError:
+            from backend.services.data.bar_metrics import (
+                FAKE_LIST_DATE,
+                INSUFFICIENT_DATA_LABEL,
+                measure_local_metrics,
+            )
 
         conn = self._connect()
-        calc = ATRCalculator(period=14)
         updated_count = 0
         try:
             with conn.cursor() as cursor:
@@ -526,26 +636,28 @@ class ETFPoolRepository:
                 df = pd.DataFrame(rows)
                 updates = []
                 for code, group in df.groupby("etf_code"):
-                    if len(group) >= 14:
-                        try:
-                            res = calc.calculate_atr(group.copy())
-                            latest = res.iloc[-1]
-                            real_atr = round(float(latest["atr_pct"]), 2)
-                            if real_atr >= 3.0:
-                                elasticity = "高弹性"
-                            elif real_atr >= 2.0:
-                                elasticity = "稳健型"
-                            else:
-                                elasticity = "低波防守"
-                            updates.append((real_atr, elasticity, code))
-                        except Exception as calc_err:
-                            logger.debug("标的 %s 计算真实 ATR 失败: %s", code, calc_err)
+                    try:
+                        metrics = measure_local_metrics(group)
+                    except Exception as calc_err:
+                        logger.debug("标的 %s 计算真实 ATR 失败: %s", code, calc_err)
+                        continue
+                    if metrics["atr_sufficient"]:
+                        atr_pct = metrics["atr_pct"]
+                        elasticity = metrics["elasticity"]
+                    else:
+                        atr_pct = 0.0
+                        elasticity = INSUFFICIENT_DATA_LABEL
+                    ma20 = metrics["amount_ma20_10k"] if metrics["turnover_sufficient"] else 0.0
+                    updates.append((atr_pct, elasticity, ma20, FAKE_LIST_DATE, INSUFFICIENT_DATA_LABEL, code))
 
                 if updates:
                     cursor.executemany(
                         """
                         UPDATE etf_instrument
-                        SET atr_pct = %s, elasticity = %s
+                        SET atr_pct = %s, elasticity = %s, amount_ma20_10k = %s,
+                            list_date = CASE
+                                WHEN list_date IS NULL OR list_date = '' OR list_date = %s
+                                THEN %s ELSE list_date END
                         WHERE etf_code = %s
                         """,
                         updates,

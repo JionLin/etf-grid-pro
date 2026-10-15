@@ -140,15 +140,15 @@ export default function GridFitBoard() {
   }, [sortedBoard, searchQuery]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-6 shadow-xs space-y-5">
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-xs space-y-5 min-w-0 max-w-full">
       {/* 顶部标题与快捷操作 */}
       <div className="flex flex-col gap-3 border-b border-gray-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
+          <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
             <Trophy className="w-5 h-5 text-amber-500" />
             <span>全市场 ETF 网格适合度金榜</span>
           </h2>
-          <p className="mt-0.5 text-xs text-gray-500">
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             锁定标准化协议回测比较 11 个可购赛道，主排序列为【{CASH_YIELD_LABEL}】
           </p>
         </div>
@@ -228,9 +228,9 @@ export default function GridFitBoard() {
       )}
 
       {/* 适合度排名表格 */}
-      <div className="overflow-x-auto border border-gray-100 rounded-xl">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-gray-50/80 text-gray-500 border-b border-gray-100 font-medium">
+      <div className="w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain border border-gray-100 dark:border-gray-700 rounded-xl">
+        <table className="min-w-[44rem] w-full text-left text-xs">
+          <thead className="bg-gray-50/80 dark:bg-gray-900/60 text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 font-medium">
             <tr>
               <th className="py-2.5 px-3 w-12 text-center">排名</th>
               <th className="py-2.5 px-3">标的 (代码/名称)</th>
@@ -250,7 +250,7 @@ export default function GridFitBoard() {
               return (
                 <tr
                   key={row.etf_code}
-                  className="hover:bg-indigo-50/30 transition-colors"
+                  className="hover:bg-indigo-50/30 dark:hover:bg-gray-700/40 transition-colors"
                 >
                   <td className="py-2.5 px-3 text-center font-mono font-bold">
                     {isTop1 ? (
@@ -272,7 +272,7 @@ export default function GridFitBoard() {
                       >
                         {row.etf_code}
                       </Link>
-                      <span className="font-medium text-gray-900 truncate max-w-[130px]">
+                      <span className="font-medium text-gray-900 dark:text-gray-100 truncate max-w-[130px]">
                         {row.etf_name}
                       </span>
                       <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 hidden sm:inline-block">
@@ -286,7 +286,7 @@ export default function GridFitBoard() {
                   <td className="py-2.5 px-3">
                     <ProtocolCell cell={row.fixed_eda} />
                   </td>
-                  <td className="py-2.5 px-3 font-mono font-bold text-gray-900">
+                  <td className="py-2.5 px-3 font-mono font-bold text-gray-900 dark:text-gray-100">
                     {formatPercentPoint(
                       row.atr?.annual_return ?? row.fixed_eda?.annual_return
                     )}
