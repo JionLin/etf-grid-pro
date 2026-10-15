@@ -121,6 +121,7 @@ class ETFAnalysisService:
             min_atr_pct=min_atr_pct,
             limit=600
         )
+        self.akshare_client.attach_quote_dates(items)
 
         # 补齐多周期回测大宽表沉淀的真实物理上市成熟度 (is_valid_5y, is_valid_3y, is_valid_1y)
         try:

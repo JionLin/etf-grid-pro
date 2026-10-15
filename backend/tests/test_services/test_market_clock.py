@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from backend.services.data.market_clock import (
     expected_settled_date,
     gap_is_only_non_trading,
+    in_continuous_session,
     is_market_closed,
     quote_date_label,
+    spot_quote_unusable,
 )
 
 
@@ -17,6 +19,20 @@ def test_utc_clock_converts_to_shanghai_session():
     at_close = datetime(2026, 10, 15, 7, 0, tzinfo=timezone.utc)
     assert is_market_closed(at_close) is True
     assert quote_date_label(at_close) == "2026-10-15"
+
+
+def test_preopen_zero_price_or_turnover_is_unusable():
+    before_open = datetime(2026, 10, 15, 8, 0)
+    weekend = datetime(2026, 10, 17, 10, 0)
+    in_session = datetime(2026, 10, 15, 10, 0)
+    assert in_continuous_session(before_open) is False
+    assert in_continuous_session(in_session) is True
+    assert spot_quote_unusable(0, 0, before_open) is True
+    assert spot_quote_unusable(1.303, 0, before_open) is True
+    assert spot_quote_unusable(1.303, None, before_open) is False
+    assert spot_quote_unusable(0, 1000, weekend) is True
+    assert spot_quote_unusable(1.303, 0, in_session) is False
+    assert spot_quote_unusable(0, 1000, in_session) is True
 
 
 def test_holiday_uses_calendar_and_weekend_fallback_stays():

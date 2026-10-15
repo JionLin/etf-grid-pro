@@ -53,6 +53,7 @@ def test_cached_pool_replaces_previous_close_with_live_quote():
 
 def test_extract_spot_quote_ignores_previous_close_when_latest_missing():
     assert AkShareClient.extract_spot_quote({"代码": "515220", "昨收": 1.292, "涨跌幅": -2.05}) is None
+    assert AkShareClient.extract_spot_quote({"代码": "515220", "最新价": 0, "昨收": 1.303, "涨跌幅": 0}) is None
 
 
 def _price_client():
@@ -158,6 +159,122 @@ def test_weekend_still_serves_previous_close_cache():
 
     assert quote is cached
     spot.assert_not_called()
+
+
+def test_preopen_zero_quote_keeps_stored_price_and_shows_previous_close_date():
+    """开盘前新浪最新价和成交额都是 0 时，不覆盖已有价格，并标出上一交易日。"""
+    client = AkShareClient.__new__(AkShareClient)
+    client.pool_repo = MagicMock()
+    pool = _stale_pool()
+    pool[0]["latest_price"] = 1.303
+    pool[0]["pct_change"] = 0.851
+    client.pool_repo.get_pool.return_value = pool
+    rows = [{
+        "代码": "sh515220",
+        "名称": "煤炭ETF国泰",
+        "最新价": 0,
+        "涨跌幅": 0,
+        "成交额": 0,
+        "昨收": 1.303,
+    }]
+
+    with patch("backend.services.data.akshare_client.datetime", _clock(datetime(2026, 10, 15, 8, 0))), \
+         patch.object(client, "_load_category_spot_rows", return_value=rows):
+        refreshed = client.build_or_get_etf_pool()
+
+    coal = next(item for item in refreshed if item["etf_code"] == "515220")
+    assert coal["latest_price"] == 1.303
+    assert coal["pct_change"] == 0.851
+    assert coal["quote_date"] == "2026-10-14"
+    client.pool_repo.update_quotes.assert_not_called()
+
+
+def test_preopen_zero_price_falls_back_to_last_bar_when_stored_price_is_empty():
+    client = AkShareClient.__new__(AkShareClient)
+    client.pool_repo = MagicMock()
+    pool = _stale_pool()
+    pool[0]["latest_price"] = 0
+    pool[0]["pct_change"] = 0
+    client.pool_repo.get_pool.return_value = pool
+
+    def metrics(code):
+        if code != "515220":
+            return {"last_bar": None}
+        return {
+            "last_bar": {
+                "close": 1.303,
+                "trade_date": "2026-10-14",
+                "amount_10k": 68047.65,
+                "pct_change": 0.85,
+            }
+        }
+
+    client._local_bar_metrics = metrics
+    rows = [{"代码": "sh515220", "最新价": 0, "涨跌幅": 0, "成交额": 0, "昨收": 1.303}]
+
+    with patch("backend.services.data.akshare_client.datetime", _clock(datetime(2026, 10, 15, 8, 0))), \
+         patch.object(client, "_load_category_spot_rows", return_value=rows):
+        refreshed = client.build_or_get_etf_pool()
+
+    coal = next(item for item in refreshed if item["etf_code"] == "515220")
+    assert coal["latest_price"] == 1.303
+    assert coal["pct_change"] == 0.85
+    assert coal["quote_date"] == "2026-10-14"
+    client.pool_repo.update_quotes.assert_called_once_with([("515220", 1.303, 0.85)])
+
+
+def test_preopen_rebuild_keeps_names_when_turnover_is_zero():
+    """全量重建时，开盘前的 0 成交额不能把池子滤空，价格用最后一根收盘。"""
+    client = AkShareClient.__new__(AkShareClient)
+    client.pool_repo = MagicMock()
+    client.pool_repo.get_pool.return_value = []
+    client._local_bar_metrics = lambda _code: {
+        "amount_ma20_10k": 67975.81,
+        "turnover_sufficient": True,
+        "atr_sufficient": True,
+        "atr_pct": 2.52,
+        "elasticity": "稳健型",
+        "last_bar": {
+            "close": 1.303,
+            "trade_date": "2026-10-14",
+            "amount_10k": 68047.65,
+            "pct_change": 0.85,
+        },
+    }
+    rows = [{
+        "代码": "sh515220",
+        "名称": "煤炭ETF国泰",
+        "最新价": 0,
+        "涨跌幅": 0,
+        "成交额": 0,
+    }]
+
+    with patch("backend.services.data.akshare_client.datetime", _clock(datetime(2026, 10, 15, 8, 0))), \
+         patch.object(client, "_load_category_spot_rows", return_value=rows):
+        client.build_or_get_etf_pool(min_amount_10k=1000)
+
+    saved = client.pool_repo.save_pool.call_args.args[0]
+    assert saved[0]["etf_code"] == "515220"
+    assert saved[0]["latest_price"] == 1.303
+    assert saved[0]["pct_change"] == 0.85
+    assert saved[0]["amount_10k"] == 68047.65
+
+
+def test_category_fetch_timeout_falls_back_to_cached_pool():
+    import requests
+
+    client = AkShareClient.__new__(AkShareClient)
+    client.pool_repo = MagicMock()
+    cached = [{"etf_code": "515220", "latest_price": 1.303, "pct_change": 0.851}]
+    client.pool_repo.get_pool.return_value = cached
+
+    with patch("requests.get", side_effect=requests.Timeout("slow")) as get:
+        result = client.build_or_get_etf_pool(min_amount_10k=1000)
+
+    assert get.call_args.kwargs["timeout"] == 10
+    assert result[0]["latest_price"] == 1.303
+    assert result[0]["quote_date"]
+    client.pool_repo.save_pool.assert_not_called()
 
 
 def test_quote_date_label_rolls_back_before_open_and_weekend():

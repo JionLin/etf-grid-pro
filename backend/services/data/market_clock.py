@@ -28,6 +28,44 @@ def is_market_closed(moment: Optional[datetime] = None, close_hm: str = MARKET_C
     return as_shanghai(moment).strftime("%H:%M") >= close_hm
 
 
+def in_continuous_session(
+    moment: Optional[datetime] = None,
+    trading_days: Optional[Iterable[str]] = None,
+) -> bool:
+    """交易日 09:30 至 15:00 之间。开盘前、收盘后和休市日都不是。"""
+    day = as_shanghai(moment)
+    clock = day.strftime("%H:%M")
+    return is_trading_day(day, trading_days) and MARKET_OPEN <= clock < MARKET_CLOSE
+
+
+def _positive_number(value: object) -> bool:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return number == number and number > 0
+
+
+def spot_quote_unusable(
+    price: object,
+    turnover: object = None,
+    moment: Optional[datetime] = None,
+    trading_days: Optional[Iterable[str]] = None,
+) -> bool:
+    """开盘前、收盘后、休市日的最新价 <= 0 或成交额为 0，不能当成有效行情。
+
+    成交额缺字段时不据此判无效，避免没有该列的正常报价被丢掉。
+    连续竞价里只拒绝非正价格。
+    """
+    if in_continuous_session(moment, trading_days):
+        return not _positive_number(price)
+    if not _positive_number(price):
+        return True
+    if turnover is None:
+        return False
+    return not _positive_number(turnover)
+
+
 def _trading_day_keys(trading_days: Optional[Iterable[str]]) -> Optional[Set[str]]:
     if not trading_days:
         return None
