@@ -142,6 +142,7 @@ const AnalysisReport = ({
           message="正在分析ETF数据..."
           showProgress={true}
           progress={75}
+          analysisDays={backtestParams?.analysisDays || backtestParams?.analysis_days}
         />
       )}
 
