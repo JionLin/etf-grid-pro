@@ -87,7 +87,8 @@ _STATEMENTS = (
         completed_at VARCHAR(32) NULL COMMENT '全市场日K引导完成时间。空表示尚未完成，启动时要续传',
         total_codes INT NOT NULL DEFAULT 0 COMMENT '当前名单上的代码数',
         done_codes INT NOT NULL DEFAULT 0 COMMENT '已有日K或确认源站无行情的代码数',
-        updated_at VARCHAR(32) NULL COMMENT '最近写入时间，东八区本地时间字符串'
+        updated_at VARCHAR(32) NULL COMMENT '最近写入时间，东八区本地时间字符串',
+        empty_recheck_at VARCHAR(32) NULL COMMENT '误记空行情的回查标记。空表示还没做过这次修复'
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全市场日K引导进度。完成前不把标的池当成已经建完'
     """,
     """
@@ -452,6 +453,34 @@ def ensure_database(name: str) -> None:
     ensure_tables(name)
 
 
+def ensure_bootstrap_recheck_column(cursor, database: Optional[str] = None) -> None:
+    """旧库补上误记空行情的回查时间。已有这一列时不改数据。"""
+    if is_sqlite():
+        cursor.execute("PRAGMA table_info(universe_bootstrap)")
+        names = {row["name"] for row in cursor.fetchall()}
+        if "empty_recheck_at" not in names:
+            cursor.execute(
+                "ALTER TABLE universe_bootstrap ADD COLUMN empty_recheck_at TEXT NULL"
+            )
+        return
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'universe_bootstrap'
+          AND COLUMN_NAME = 'empty_recheck_at'
+        """,
+        (database or DEFAULT_DATABASE,),
+    )
+    if cursor.fetchone() is None:
+        cursor.execute(
+            """
+            ALTER TABLE universe_bootstrap
+            ADD COLUMN empty_recheck_at VARCHAR(32) NULL
+            COMMENT '误记空行情的回查标记。空表示还没做过这次修复'
+            """
+        )
+
+
 def ensure_tables(database: Optional[str] = None) -> None:
     conn = connect(database)
     try:
@@ -464,6 +493,7 @@ def ensure_tables(database: Optional[str] = None) -> None:
                         cursor.execute(index_sql)
                 else:
                     cursor.execute(statement)
+            ensure_bootstrap_recheck_column(cursor, database)
         conn.commit()
     finally:
         conn.close()

@@ -51,6 +51,10 @@ def resume_universe_bootstrap(
     progress_callback=None,
 ) -> Dict[str, Any]:
     """续传全市场日 K。只拉还没有进度的代码，拉完后重建标的池。"""
+    bars = set(market_repo.codes_with_bars() or [])
+    reopened = bootstrap_repo.recheck_barless_empties(bars)
+    if reopened:
+        logger.info("空行情回查 %s 只，已改回待拉取", len(reopened))
     saved = bootstrap_repo.saved_instruments()
     latest = None
     try:
@@ -68,7 +72,6 @@ def resume_universe_bootstrap(
             "reason": "empty_market_list",
         }
 
-    bars = set(market_repo.codes_with_bars() or [])
     pending = bootstrap_repo.prepare(instruments, bars)
     progress = bootstrap_repo.progress()
     if not pending:

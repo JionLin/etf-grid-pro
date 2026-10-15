@@ -240,6 +240,113 @@ def test_bootstrap_uses_at_most_three_workers():
     _wipe(repo)
 
 
+def _mark_empty(repo: UniverseBootstrapRepository, code: str) -> None:
+    repo.record_result({
+        "etf_code": code,
+        "status": "failed",
+        "error": "拉取到的行情数据为空",
+    })
+
+
+def _backdate(repo: UniverseBootstrapRepository, code: str, stamp: str) -> None:
+    conn = repo._connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE universe_bootstrap_code SET updated_at = %s WHERE etf_code = %s",
+                (stamp, code),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_barless_empty_is_reopened_once_and_completed_flag_clears():
+    repo = UniverseBootstrapRepository()
+    _wipe(repo)
+    _bars("990482")
+    _bars("990483")
+    repo.prepare([
+        {"etf_code": "990481", "etf_name": "误空"},
+        {"etf_code": "990482", "etf_name": "有K的空"},
+        {"etf_code": "990483", "etf_name": "已同步"},
+    ], {"990482", "990483"})
+    _mark_empty(repo, "990481")
+    _mark_empty(repo, "990482")
+    repo.record_result({"etf_code": "990483", "status": "synced"})
+    assert repo.is_complete() is True
+
+    reopened = repo.recheck_barless_empties({"990482", "990483"})
+    assert reopened == ["990481"]
+    assert [row["etf_code"] for row in repo.pending_instruments()] == ["990481"]
+    assert repo.is_complete() is False
+    assert repo.progress()["active"] is True
+
+    _mark_empty(repo, "990481")
+    assert repo.recheck_barless_empties({"990482", "990483"}) == []
+    assert repo.pending_instruments() == []
+    assert repo.is_complete() is True
+
+    _backdate(repo, "990481", "2020-01-01 00:00:00")
+    assert repo.recheck_barless_empties({"990482", "990483"}) == ["990481"]
+    assert repo.is_complete() is False
+    _mark_empty(repo, "990481")
+    assert repo.recheck_barless_empties({"990482", "990483"}) == []
+    _wipe(repo)
+
+
+def test_startup_reopens_false_empties_then_leaves_a_fresh_empty_alone():
+    repo = UniverseBootstrapRepository()
+    _wipe(repo)
+    _bars("990492")
+    repo.prepare([
+        {"etf_code": "990491", "etf_name": "误空"},
+        {"etf_code": "990492", "etf_name": "已有"},
+    ], {"990492"})
+    _mark_empty(repo, "990491")
+    repo.record_result({"etf_code": "990492", "status": "synced"})
+    assert repo.is_complete() is True
+
+    sync_service = MagicMock()
+    sync_service.sync_universe.return_value = {
+        "synced": 0,
+        "skipped": 0,
+        "failed_count": 0,
+        "results": [{
+            "etf_code": "990491",
+            "status": "failed",
+            "error": "拉取到的行情数据为空",
+        }],
+    }
+    instruments = [
+        {"etf_code": "990491", "etf_name": "误空"},
+        {"etf_code": "990492", "etf_name": "已有"},
+    ]
+    outcome = resume_universe_bootstrap(
+        bootstrap_repo=repo,
+        market_repo=MarketDataRepository(),
+        sync_service=sync_service,
+        list_loader=lambda: instruments,
+        pool_builder=MagicMock(),
+    )
+    called = [row["etf_code"] for row in sync_service.sync_universe.call_args.kwargs["instruments"]]
+    assert called == ["990491"]
+    assert outcome["complete"] is True
+    assert repo.pending_instruments() == []
+
+    sync_service.sync_universe.reset_mock()
+    again = resume_universe_bootstrap(
+        bootstrap_repo=repo,
+        market_repo=MarketDataRepository(),
+        sync_service=sync_service,
+        list_loader=lambda: instruments,
+        pool_builder=MagicMock(),
+    )
+    assert again["complete"] is True
+    sync_service.sync_universe.assert_not_called()
+    _wipe(repo)
+
+
 def test_full_universe_sync_uses_the_market_list_not_the_current_pool():
     repo = UniverseBootstrapRepository()
     _wipe(repo)

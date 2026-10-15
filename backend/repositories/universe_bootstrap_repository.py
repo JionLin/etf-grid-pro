@@ -1,7 +1,7 @@
 """全市场日 K 引导进度。同一套表在 SQLite 和 MySQL 上读写。"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .mysql_connection import DEFAULT_DATABASE, connect
@@ -13,6 +13,7 @@ _PENDING = "pending"
 _SYNCED = "synced"
 _EMPTY = "empty"
 _DONE = {_SYNCED, _EMPTY}
+EMPTY_RECHECK_DAYS = 7
 
 
 class UniverseBootstrapRepository:
@@ -138,6 +139,73 @@ class UniverseBootstrapRepository:
         finally:
             conn.close()
         return self.pending_instruments()
+
+    def recheck_barless_empties(self, codes_with_bars: Iterable[str]) -> List[str]:
+        """把没有日 K、却被记成空行情的代码改回待拉取。
+
+        第一次启动写下 empty_recheck_at。这次修复之前的尝试都会改回。
+        之后同一只代码最多每 7 天再查一次，避免真的没有行情的代码每次启动都重拉。
+        本地已经有日 K 的不改。有代码被改回时清掉完成时间。
+        """
+        covered = {str(code) for code in (codes_with_bars or [])}
+        now = _now()
+        now_dt = datetime.strptime(now, "%Y-%m-%d %H:%M:%S")
+        cutoff = (now_dt - timedelta(days=EMPTY_RECHECK_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT empty_recheck_at FROM universe_bootstrap WHERE id = %s",
+                    (1,),
+                )
+                state = cursor.fetchone() or {}
+                flag = state.get("empty_recheck_at")
+                cursor.execute(
+                    """
+                    SELECT etf_code, updated_at FROM universe_bootstrap_code
+                    WHERE status = %s
+                    """,
+                    (_EMPTY,),
+                )
+                targets = []
+                for row in cursor.fetchall():
+                    code = str(row["etf_code"])
+                    if code in covered:
+                        continue
+                    updated = str(row.get("updated_at") or "")
+                    before_fix = not flag or not updated or updated < str(flag)
+                    stale = not updated or updated <= cutoff
+                    if before_fix or stale:
+                        targets.append(code)
+                if not flag:
+                    cursor.execute(
+                        """
+                        INSERT INTO universe_bootstrap (
+                            id, list_fetched_at, completed_at, total_codes, done_codes,
+                            updated_at, empty_recheck_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            empty_recheck_at = COALESCE(empty_recheck_at, VALUES(empty_recheck_at))
+                        """,
+                        (1, now, None, 0, 0, now, now),
+                    )
+                if not targets:
+                    conn.commit()
+                    return []
+                for code in targets:
+                    cursor.execute(
+                        """
+                        UPDATE universe_bootstrap_code
+                        SET status = %s, updated_at = %s
+                        WHERE etf_code = %s
+                        """,
+                        (_PENDING, now, code),
+                    )
+                self._recount(cursor, now)
+                conn.commit()
+            return targets
+        finally:
+            conn.close()
 
     def record_result(self, result: Dict[str, Any]) -> None:
         """把单只代码的同步结果写进进度。网络失败保持 pending，下次再拉。"""
