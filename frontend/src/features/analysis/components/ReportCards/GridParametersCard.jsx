@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatPercent, formatDate, formatPriceDate } from "@shared/utils";
 import StressTestSandboxCard from "./StressTestSandboxCard";
+import { buildBrokerOrderSheet } from "./brokerOrderSheet";
 import { ETF_CATEGORIES } from "@shared/constants/etfCategories";
 
 const GridParametersCard = ({
@@ -117,6 +118,19 @@ const GridParametersCard = ({
     lines.push(`* 请在券商 APP (华宝智投/银河/同花顺等) 条件单中直接按上述价格与股数设置。`);
     navigator.clipboard.writeText(lines.join("\n"));
     setCopiedKey("copy_all_orders");
+    setTimeout(() => setCopiedKey(null), 2500);
+  };
+
+  const handleCopyBrokerSheet = (orders, baseInfo) => {
+    const symbolCode = inputParameters?.etfCode || inputParameters?.etf_code || "";
+    const text = buildBrokerOrderSheet({
+      code: symbolCode,
+      orders,
+      basePosition: baseInfo,
+      anchorPrice: benchmarkPrice || current_price,
+    });
+    navigator.clipboard.writeText(text);
+    setCopiedKey("copy_broker_sheet");
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
@@ -506,6 +520,30 @@ const GridParametersCard = ({
                     <>
                       <Copy className="w-3.5 h-3.5" />
                       <span>一键复制条件单</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const comp = gridStrategy.composite_grid;
+                    const list = comp?.merged_ladder
+                      ? comp.merged_ladder.filter((o) => selectedRail === "all" || o.rail === selectedRail)
+                      : [];
+                    handleCopyBrokerSheet(list, selectedRail === "all" ? comp?.base_position : null);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors shadow-2xs"
+                  title="复制成券商条件单表格：代码、方向、触发价、股数、备注"
+                >
+                  {copiedKey === "copy_broker_sheet" ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <span className="text-green-700 font-bold">已复制条件单表格</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>复制条件单表格</span>
                     </>
                   )}
                 </button>
@@ -1046,7 +1084,7 @@ const GridParametersCard = ({
                   </table>
                 </div>
                 <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span>💡 提示：所有挂单股数已自动按整百股数（100股整数倍）对齐，点击单笔“复制”或右上角“一键复制条件单”可快速在券商 APP 设置</span>
+                  <span>💡 提示：股数已按 100 股对齐。「复制条件单表格」含代码、方向、触发价、股数、备注；同价多笔会合并，底仓单独一条。留利润不会自动执行。</span>
                   <span className="font-semibold text-gray-700">
                     当前视图: {gridStrategy.composite_grid?.merged_ladder?.filter((o) => selectedRail === "all" || o.rail === selectedRail).length || gridStrategy.price_levels?.length || 0} 档
                   </span>

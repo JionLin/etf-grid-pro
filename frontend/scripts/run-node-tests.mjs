@@ -9,6 +9,7 @@ const nodeTests = [
   "src/shared/utils/format.test.js",
   "src/features/analysis/components/ReportCards/gridFitDisplay.test.js",
   "src/features/analysis/components/ReportCards/archiveFilters.test.js",
+  "src/features/analysis/components/ReportCards/brokerOrderSheet.test.js",
 ];
 
 const scriptTests = [
