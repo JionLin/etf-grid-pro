@@ -97,3 +97,41 @@ export function buildBrokerOrderSheet({ code, orders, basePosition, anchorPrice 
   const table = rows.map((row) => row.join("\t")).join("\n");
   return `${table}\n说明\t留利润不会自动执行，卖出后的留股需要自行处理。`;
 }
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  if (/[",\n\r]/.test(text)) return `"${text.replaceAll('"', '""')}"`;
+  return text;
+}
+
+export function buildBrokerOrderCsv({ code, orders, basePosition, anchorPrice } = {}) {
+  const symbol = String(code || "").trim();
+  const rows = [["代码", "方向", "触发价", "股数", "备注"]];
+  brokerOrderRecords({ orders, basePosition, anchorPrice }).forEach((record) => {
+    rows.push([
+      symbol,
+      record.side,
+      Number(record.trigger_price).toFixed(3),
+      String(record.shares),
+      record.note,
+    ]);
+  });
+  rows.push(["说明", "留利润不会自动执行，卖出后的留股需要自行处理。", "", "", ""]);
+  const body = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+  return `\uFEFF${body}`;
+}
+
+export function downloadBrokerOrderCsv(args) {
+  const text = buildBrokerOrderCsv(args);
+  if (typeof document === "undefined") return text;
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${String(args.code || "etf").trim() || "etf"}-条件单.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return text;
+}
