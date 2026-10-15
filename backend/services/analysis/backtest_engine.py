@@ -12,6 +12,18 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def closed_loop_win_rate(trades: List[Dict[str, Any]]) -> Optional[float]:
+    """闭环胜率：先买后卖、扣完双边费用后仍盈利的笔数 / 闭环笔数。底仓高抛不算闭环。"""
+    closed = [
+        trade for trade in trades
+        if trade.get("action") == "SELL" and trade.get("slot_type") == "BUY_GRID"
+    ]
+    if not closed:
+        return None
+    wins = sum(1 for trade in closed if float(trade.get("profit") or 0) > 0)
+    return round(wins / len(closed) * 100, 1)
+
+
 def calculate_sortino_ratio(
     equity_curve: List[Dict[str, Any]], rf: float = 0.02, periods: int = 250
 ) -> Optional[float]:
@@ -640,10 +652,7 @@ class GridBacktestEngine:
         buy_count = sum(1 for t in trades if t["action"] == "BUY")
         total_trades_count = len(trades)
         paired_count = min(sell_count, buy_count)
-        winning_sells = sum(
-            1 for t in trades if t["action"] == "SELL" and float(t.get("profit") or 0) > 0
-        )
-        win_rate = round(winning_sells / sell_count * 100, 1) if sell_count > 0 else None
+        win_rate = closed_loop_win_rate(trades)
 
         # 网格做 T 纯差价落袋利润总额
         grid_cash_profit = sum(t.get("profit", 0.0) for t in trades if t["action"] == "SELL")

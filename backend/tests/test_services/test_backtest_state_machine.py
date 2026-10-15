@@ -142,7 +142,7 @@ def test_fee_eaten_sell_is_loss_and_excluded_from_win_rate():
 
     assert len(sells) == 1
     assert sells[0]["profit"] < 0
-    assert res["summary"]["win_rate"] == 0.0
+    assert res["summary"]["win_rate"] is None
 
     small_rail = next(r for r in res["rail_attribution"] if r["rail"] == "small")
     assert small_rail["profit"] < 0

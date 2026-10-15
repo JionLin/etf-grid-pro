@@ -617,7 +617,7 @@ const BacktestCard = ({
             {/* 5. 胜率与风控 */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-purple-50/80 to-white border border-purple-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
-                <span>做T胜率 / 最大回撤</span>
+                <span>闭环胜率 / 最大回撤</span>
                 <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
               </div>
               <div className="flex items-baseline gap-2">

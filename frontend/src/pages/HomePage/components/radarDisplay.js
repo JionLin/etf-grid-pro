@@ -52,6 +52,19 @@ export function maturityCounts(items) {
   };
 }
 
+export function rankBadge(item) {
+  if (!item || item.score === undefined || item.score === null || item.score === "") {
+    return "";
+  }
+  const drawdown = item.max_drawdown === undefined || item.max_drawdown === null
+    ? ""
+    : ` · 回撤 ${item.max_drawdown}%`;
+  if (item.score_kind === "cash_yield") {
+    return `年化做T ${item.score}%${drawdown}`;
+  }
+  return `价差分 ${item.score}${drawdown}`;
+}
+
 export function poolAtrParams(minAtr, commodityExempt) {
   const floor = String(minAtr) === "1.0" ? "1.0" : "1.5";
   return {

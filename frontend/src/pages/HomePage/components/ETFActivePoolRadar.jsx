@@ -20,6 +20,7 @@ import {
   storageBadge,
   poolAtrParams,
   atrFloorLabel,
+  rankBadge,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -102,26 +103,12 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     setSearchHistory([]);
   };
 
-  const renderScoreBadge = (score) => {
-    if (score === undefined || score === null) return null;
-    const num = Number(score);
-    if (num >= 80) {
-      return (
-        <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 shrink-0">
-          {num}分·极佳
-        </span>
-      );
-    }
-    if (num >= 60) {
-      return (
-        <span className="bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800 shrink-0">
-          {num}分·适中
-        </span>
-      );
-    }
+  const renderScoreBadge = (item) => {
+    const text = rankBadge(item);
+    if (!text) return null;
     return (
-      <span className="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-400 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
-        {num}分
+      <span className="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
+        {text}
       </span>
     );
   };
@@ -665,7 +652,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                           T+0
                         </span>
                       )}
-                      {renderScoreBadge(item.score)}
+                      {renderScoreBadge(item)}
                     </div>
                   </div>
 

@@ -138,6 +138,9 @@ class ETFAnalysisService:
         except Exception as e:
             logger.warning(f"补齐标的成熟度标记失败: {e}")
 
+        self._attach_rank_scores(items)
+        items.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
+
         summary = self.akshare_client.pool_repo.get_sectors_summary(
             min_ma20_amount_10k=min_ma20_amount_10k,
             min_atr_pct=min_atr_pct
@@ -166,6 +169,31 @@ class ETFAnalysisService:
             return storage_label()
         except Exception:
             return "本地数据库"
+
+    def _attach_rank_scores(self, items: List[Dict[str, Any]]) -> None:
+        from services.data.bar_metrics import pool_rank_score
+
+        fits: Dict[str, Dict[str, Any]] = {}
+        try:
+            from repositories.grid_fit_repository import GridFitRepository
+            from services.analysis.grid_fit_service import PROTOCOL_VERSION
+
+            for row in GridFitRepository().list_runs(PROTOCOL_VERSION):
+                if row.get("step_mode") != "atr":
+                    continue
+                fits[str(row.get("etf_code"))] = row
+        except Exception as exc:
+            logger.warning("读取适合度年化收益失败: %s", exc)
+        for item in items:
+            fit = fits.get(str(item.get("etf_code")))
+            cash_yield = None
+            if fit and fit.get("status") == "ranked" and fit.get("cash_yield") is not None:
+                cash_yield = fit.get("cash_yield")
+            score, kind = pool_rank_score(item.get("atr_pct"), item.get("amount_ma20_10k"), cash_yield)
+            item["score"] = score
+            item["score_kind"] = kind
+            if fit and fit.get("max_drawdown") is not None:
+                item["max_drawdown"] = fit.get("max_drawdown")
 
     def _pool_backfilling(self, item_count: int) -> bool:
         try:

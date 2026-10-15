@@ -13,6 +13,7 @@ import {
   storageBadge,
   poolAtrParams,
   atrFloorLabel,
+  rankBadge,
 } from "./radarDisplay.js";
 
 test("default collapse limit is 6 items", () => {
@@ -51,6 +52,14 @@ test("subsector counts come from the catalog, including zeros", () => {
     subsectorsForSector(summary, "医药健康").map((item) => item.count),
     [1, 0]
   );
+});
+
+test("rank badge uses cash yield and drawdown instead of a saturated score", () => {
+  assert.equal(
+    rankBadge({ score: 12.6, score_kind: "cash_yield", max_drawdown: 18.2 }),
+    "年化做T 12.6% · 回撤 18.2%"
+  );
+  assert.equal(rankBadge({ score: 24.4, score_kind: "spread" }), "价差分 24.4");
 });
 
 test("atr floor can drop to 1.0 and labels the commodity exemption", () => {

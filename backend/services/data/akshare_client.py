@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
-from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics
+from .bar_metrics import INSUFFICIENT_DATA_LABEL, measure_local_metrics, pool_rank_score
 from .trading_calendar import load_trading_year
 from .market_clock import (
     SHANGHAI,
@@ -1368,7 +1368,7 @@ class AkShareClient:
                     'atr_pct': metrics['atr_pct'],
                     'elasticity': metrics['elasticity'],
                     'metrics_status': 'local_bars',
-                    'score': round(min(98.0, 70.0 + (ma20_amt_10k / 5000.0) * 5 + metrics['atr_pct'] * 4), 1)
+                    'score': pool_rank_score(metrics['atr_pct'], ma20_amt_10k)[0]
                 })
 
             self.pool_repo.save_pool(cleaned_records)

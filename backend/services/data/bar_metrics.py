@@ -21,6 +21,15 @@ TURNOVER_BAR_COUNT = 20
 FAKE_LIST_DATE = "2023前成熟上市"
 
 
+def pool_rank_score(atr_pct: float, amount_ma20_10k: float, cash_yield: Optional[float] = None):
+    """排序分。有适合度年化做 T 现金收益时用它，否则用价差，不再把流动标的都压到 98。"""
+    if cash_yield is not None:
+        return round(float(cash_yield) * 100.0, 2), "cash_yield"
+    atr = float(atr_pct or 0.0)
+    turnover = min(max(float(amount_ma20_10k or 0.0), 0.0), 50000.0)
+    return round(atr * 10.0 + turnover / 5000.0, 1), "spread"
+
+
 def elasticity_from_atr(atr_pct: float) -> str:
     """按真实 ATR 百分比划分弹性档。
 

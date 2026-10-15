@@ -85,6 +85,28 @@ def test_sync_does_not_store_today_before_close(monkeypatch):
     assert result["status"] == "synced"
 
 
+def test_rank_score_uses_cash_yield_and_does_not_saturate():
+    from backend.services.data.bar_metrics import pool_rank_score
+    from backend.services.analysis.backtest_engine import closed_loop_win_rate
+
+    liquid, kind = pool_rank_score(3.0, 80000)
+    quieter, _ = pool_rank_score(1.6, 4000)
+    assert kind == "spread"
+    assert liquid != 98
+    assert liquid > quieter
+    yielded, yield_kind = pool_rank_score(3.0, 80000, cash_yield=0.126)
+    assert yield_kind == "cash_yield"
+    assert yielded == 12.6
+    assert closed_loop_win_rate([
+        {"action": "SELL", "slot_type": "SELL_GRID", "profit": 10},
+        {"action": "SELL", "slot_type": "BUY_GRID", "profit": -0.2},
+        {"action": "SELL", "slot_type": "BUY_GRID", "profit": 1.5},
+    ]) == 50.0
+    assert closed_loop_win_rate([
+        {"action": "SELL", "slot_type": "SELL_GRID", "profit": 10},
+    ]) is None
+
+
 def test_short_history_is_marked_insufficient():
     metrics = measure_local_metrics(_bars(5))
     assert metrics["atr_sufficient"] is False
