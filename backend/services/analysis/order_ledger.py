@@ -34,6 +34,23 @@ def initial_status(note: str = "", rail: str = "", role: str = "") -> str:
     return "未挂"
 
 
+class StalePostedOrders(ValueError):
+    """再保存时，已挂单的价格不在新网格里。调用方要先让用户选择。"""
+
+    def __init__(self, orders):
+        self.orders = []
+        for row in orders or []:
+            self.orders.append({
+                "id": row["id"],
+                "side": row["side"],
+                "trigger_price": round(float(row["trigger_price"]), 3),
+                "shares": int(row["shares"]),
+                "note": row.get("note") or "",
+                "status": row["status"],
+            })
+        super().__init__("旧的已挂单不在新网格里")
+
+
 def order_key(side: str, trigger_price: float, shares: int) -> tuple:
     return (normalize_side(side), round(float(trigger_price), 3), int(shares))
 

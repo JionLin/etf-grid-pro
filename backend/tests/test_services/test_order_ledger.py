@@ -2,6 +2,7 @@ import pytest
 
 from backend.repositories.ledger_repository import LedgerRepository
 from backend.services.analysis.order_ledger import may_fill_today
+from services.analysis.order_ledger import StalePostedOrders
 
 
 def test_may_fill_today_only_flags_open_orders_that_price_has_reached():
@@ -45,3 +46,39 @@ def test_ledger_keeps_status_and_flags_a_live_order():
     assert sell["may_fill_today"] is True
     with pytest.raises(ValueError, match="状态只能是"):
         repo.set_status(kept["id"], "成交了")
+
+
+def test_resave_asks_before_stale_posted_orders_stay_beside_the_new_grid():
+    repo = LedgerRepository()
+    code = "515231"
+    repo.save_plan(code, "测试", 1.25, 0, 0, [
+        {"side": "买入", "trigger_price": 1.20, "shares": 500, "note": "小网"},
+        {"side": "买入", "trigger_price": 1.05, "shares": 800, "note": "大网"},
+    ])
+    plan = repo.get_plan(code)
+    for item in plan["orders"]:
+        repo.set_status(item["id"], "已挂")
+
+    fresh = [
+        {"side": "买入", "trigger_price": 1.20, "shares": 500, "note": "小网"},
+        {"side": "买入", "trigger_price": 1.10, "shares": 600, "note": "中网"},
+    ]
+    with pytest.raises(StalePostedOrders) as caught:
+        repo.save_plan(code, "测试", 1.25, 0, 0, fresh)
+    assert any(round(float(item["trigger_price"]), 3) == 1.05 for item in caught.value.orders)
+    untouched = repo.get_plan(code)
+    assert {item["status"] for item in untouched["orders"]} == {"已挂"}
+    assert any(round(float(item["trigger_price"]), 3) == 1.05 for item in untouched["orders"])
+
+    kept = repo.save_plan(code, "测试", 1.25, 0, 0, fresh, posted_policy="keep")
+    by_price = {round(float(item["trigger_price"]), 3): item for item in kept["orders"] if item["status"] != "作废"}
+    assert by_price[1.20]["status"] == "已挂"
+    assert by_price[1.10]["status"] == "未挂"
+    stale = next(item for item in kept["orders"] if round(float(item["trigger_price"]), 3) == 1.05)
+    assert stale["status"] == "作废"
+
+    repo.set_status(by_price[1.20]["id"], "已挂")
+    voided = repo.save_plan(code, "测试", 1.25, 0, 0, fresh, posted_policy="void")
+    live = [item for item in voided["orders"] if item["status"] != "作废"]
+    assert all(item["status"] == "未挂" for item in live)
+    assert not any(item["status"] == "已挂" for item in voided["orders"])

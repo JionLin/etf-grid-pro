@@ -21,6 +21,7 @@ export default function OrderLedgerCard({
 }) {
   const [plan, setPlan] = useState(null);
   const [message, setMessage] = useState("");
+  const [staleOrders, setStaleOrders] = useState([]);
 
   const load = async (price) => {
     if (!etfCode) return;
@@ -34,7 +35,7 @@ export default function OrderLedgerCard({
     load(currentPrice).catch(() => setMessage("账本暂时读不出来"));
   }, [etfCode, currentPrice]);
 
-  const save = async () => {
+  const save = async (postedPolicy) => {
     if (!etfCode) return;
     setMessage("");
     const res = await fetch("/api/ledger", {
@@ -45,6 +46,7 @@ export default function OrderLedgerCard({
         etfName: etfName || "",
         anchorPrice,
         currentPrice,
+        postedPolicy: postedPolicy || undefined,
         base: {
           shares: basePosition?.shares || 0,
           price: basePosition?.current_price || anchorPrice,
@@ -53,10 +55,16 @@ export default function OrderLedgerCard({
       }),
     });
     const json = await res.json();
+    if (res.status === 409 && json.needs_choice) {
+      setStaleOrders(json.stale_orders || []);
+      setMessage(json.error || "请选择如何处理旧的已挂单");
+      return;
+    }
     if (!json.success) {
       setMessage(json.error || "保存失败");
       return;
     }
+    setStaleOrders([]);
     setPlan(json.data);
     setMessage("已写入本机账本");
   };
@@ -90,6 +98,30 @@ export default function OrderLedgerCard({
         </button>
       </div>
       {message && <p className="text-xs text-slate-600">{message}</p>}
+      {staleOrders.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
+          <p className="text-xs text-amber-900">
+            有 {staleOrders.length} 笔已挂单不在新网格里
+            （{staleOrders.map((order) => `${order.side} ${Number(order.trigger_price).toFixed(3)}`).join("，")}）。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => save("void")}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-800 text-white"
+            >
+              旧的已挂单一并作废
+            </button>
+            <button
+              type="button"
+              onClick={() => save("keep")}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-amber-400 bg-white text-amber-900"
+            >
+              只保留新表里还有的档
+            </button>
+          </div>
+        </div>
+      )}
       {rows.length === 0 ? (
         <p className="text-xs text-slate-400">还没有保存。保存后会按现价标出今天可能成交的未完成单。</p>
       ) : (

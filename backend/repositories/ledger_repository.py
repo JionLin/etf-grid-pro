@@ -1,11 +1,60 @@
 """本地网格账本。SQLite 与 MySQL 共用这些语句。"""
 from typing import Any, Dict, List, Optional
 
-from services.analysis.order_ledger import initial_status, may_fill_today, normalize_side, normalize_status, order_key
+from services.analysis.order_ledger import (
+    StalePostedOrders,
+    initial_status,
+    may_fill_today,
+    normalize_side,
+    normalize_status,
+    order_key,
+)
 from services.data.market_clock import shanghai_now
 
 from .mysql_connection import DEFAULT_DATABASE, connect
 from .mysql_schema import ensure_database
+
+
+def _incoming_orders(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    incoming = []
+    for order in orders or []:
+        try:
+            side = normalize_side(order.get("side") or order.get("action"))
+            price = round(float(order.get("trigger_price", order.get("price"))), 3)
+            shares = int(order.get("shares") or 0)
+        except (TypeError, ValueError):
+            continue
+        if shares <= 0 or price <= 0:
+            continue
+        note = str(order.get("note") or "")[:255]
+        rail = str(order.get("rail") or "")
+        role = str(order.get("role") or "")
+        incoming.append({
+            "side": side,
+            "price": price,
+            "shares": shares,
+            "note": note,
+            "rail": rail,
+            "role": role,
+            "key": order_key(side, price, shares),
+        })
+    return incoming
+
+
+def _stale_posted(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    remaining: Dict[tuple, int] = {}
+    for order in incoming:
+        remaining[order["key"]] = remaining.get(order["key"], 0) + 1
+    stale = []
+    for row in existing:
+        if row["status"] != "已挂":
+            continue
+        key = order_key(row["side"], row["trigger_price"], row["shares"])
+        if remaining.get(key, 0) > 0:
+            remaining[key] -= 1
+            continue
+        stale.append(row)
+    return stale
 
 
 class LedgerRepository:
@@ -24,14 +73,35 @@ class LedgerRepository:
         base_shares: int,
         base_price: float,
         orders: List[Dict[str, Any]],
+        posted_policy: Optional[str] = None,
     ) -> Dict[str, Any]:
         code = str(etf_code or "").strip()
         if not code:
             raise ValueError("账本需要 ETF 代码")
+        policy = str(posted_policy or "").strip()
+        if policy not in ("", "void", "keep"):
+            raise ValueError("请选择作废旧已挂单，或只保留新表里还有的档")
+        incoming = _incoming_orders(orders)
         now = shanghai_now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM grid_ledger_plan WHERE etf_code = %s", (code,))
+                plan_row = cursor.fetchone()
+                existing: List[Dict[str, Any]] = []
+                if plan_row:
+                    cursor.execute(
+                        """
+                        SELECT id, side, trigger_price, shares, note, status
+                        FROM grid_ledger_order WHERE plan_id = %s
+                        """,
+                        (int(plan_row["id"]),),
+                    )
+                    existing = list(cursor.fetchall())
+                stale = _stale_posted(existing, incoming)
+                if stale and policy not in ("void", "keep"):
+                    raise StalePostedOrders(stale)
+
                 cursor.execute(
                     """
                     INSERT INTO grid_ledger_plan
@@ -48,33 +118,30 @@ class LedgerRepository:
                 )
                 cursor.execute("SELECT id FROM grid_ledger_plan WHERE etf_code = %s", (code,))
                 plan_id = int(cursor.fetchone()["id"])
-                cursor.execute(
-                    "SELECT id, side, trigger_price, shares, status FROM grid_ledger_order WHERE plan_id = %s",
-                    (plan_id,),
-                )
-                existing = list(cursor.fetchall())
-                used = set()
-                for order in orders or []:
-                    side = normalize_side(order.get("side") or order.get("action"))
-                    price = round(float(order.get("trigger_price", order.get("price"))), 3)
-                    shares = int(order.get("shares") or 0)
-                    note = str(order.get("note") or "")[:255]
-                    rail = str(order.get("rail") or "")
-                    role = str(order.get("role") or "")
-                    if shares <= 0 or price <= 0:
-                        continue
+                voided_ids = set()
+                if policy == "void":
+                    for row in existing:
+                        if row["status"] != "已挂":
+                            continue
+                        cursor.execute(
+                            "UPDATE grid_ledger_order SET status = %s, updated_at = %s WHERE id = %s",
+                            ("作废", now, row["id"]),
+                        )
+                        voided_ids.add(row["id"])
+                used = set(voided_ids)
+                for order in incoming:
                     match = None
                     for row in existing:
                         if row["id"] in used:
                             continue
-                        if order_key(row["side"], row["trigger_price"], row["shares"]) == order_key(side, price, shares):
+                        if order_key(row["side"], row["trigger_price"], row["shares"]) == order["key"]:
                             match = row
                             break
                     if match:
                         used.add(match["id"])
                         cursor.execute(
                             "UPDATE grid_ledger_order SET note = %s, updated_at = %s WHERE id = %s",
-                            (note, now, match["id"]),
+                            (order["note"], now, match["id"]),
                         )
                     else:
                         cursor.execute(
@@ -83,11 +150,21 @@ class LedgerRepository:
                                 (plan_id, side, trigger_price, shares, note, status, updated_at)
                             VALUES (%s, %s, %s, %s, %s, %s, %s)
                             """,
-                            (plan_id, side, price, shares, note, initial_status(note, rail, role), now),
+                            (
+                                plan_id,
+                                order["side"],
+                                order["price"],
+                                order["shares"],
+                                order["note"],
+                                initial_status(order["note"], order["rail"], order["role"]),
+                                now,
+                            ),
                         )
                         used.add(cursor.lastrowid)
                 for row in existing:
-                    if row["id"] in used or row["status"] in ("已成", "已挂"):
+                    if row["id"] in used or row["status"] == "已成":
+                        continue
+                    if row["status"] == "已挂" and policy != "keep":
                         continue
                     cursor.execute(
                         "UPDATE grid_ledger_order SET status = %s, updated_at = %s WHERE id = %s",
