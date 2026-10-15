@@ -4,7 +4,12 @@ from datetime import datetime
 from unittest.mock import MagicMock, patch
 import pytest
 
-from services.data.startup_sync_service import StartupSyncService, LOCK_NAME
+from services.data.startup_sync_service import (
+    LOCK_NAME,
+    StartupSyncService,
+    codes_from_spot_rows,
+    pool_is_backfilling,
+)
 
 
 def test_settlement_date_calculation():
@@ -130,6 +135,64 @@ def test_two_phase_pipeline_error_handling():
         assert status["current_stage"] == "failed"
         assert status["last_error"] == "启动同步失败，请查看服务端日志"
         assert "数据库网络超时" not in status["last_error"]
+
+
+def test_empty_universe_backfills_daily_bars_from_market_list():
+    """空池不能只扫已有标的。即使 510300 已是最新，也要先拉市场列表再回补日 K。"""
+    mock_sync_service = MagicMock()
+    mock_sync_service.get_shoppable_universe.return_value = []
+    mock_matrix_service = MagicMock()
+    mock_matrix_repo = MagicMock()
+    mock_client = MagicMock()
+    mock_client._load_category_spot_rows.return_value = [
+        {"代码": "sh510300", "名称": "沪深300ETF"},
+        {"代码": "SZ159915", "名称": "创业板ETF"},
+        {"代码": "not-a-code", "名称": "无效"},
+        {"代码": "sh510300", "名称": "重复"},
+    ]
+    service = StartupSyncService(
+        market_repo=MagicMock(),
+        matrix_repo=mock_matrix_repo,
+        sync_service=mock_sync_service,
+        matrix_service=mock_matrix_service,
+        akshare_client=mock_client,
+    )
+    mock_sync_service.sync_universe.return_value = {
+        "synced": 2,
+        "skipped": 0,
+        "results": [{"etf_code": "510300", "rows_added": 10}],
+    }
+    mock_matrix_service.run_universe_matrix.return_value = []
+    mock_matrix_repo.batch_save.return_value = 0
+
+    with patch.object(service, "acquire_distributed_lock", return_value=True), \
+         patch.object(service, "release_distributed_lock"), \
+         patch.object(service, "check_freshness", return_value={
+             "expected_date": "2026-10-14",
+             "local_max_date": "2026-10-14",
+             "needs_bar_sync": False,
+             "needs_matrix_refresh": False,
+         }), \
+         patch("services.data.startup_sync_service.connect"):
+        result = service.run_sync_pipeline(workers=2, force=False)
+
+    assert result["status"] == "success"
+    instruments = mock_sync_service.sync_universe.call_args.kwargs["instruments"]
+    assert [row["etf_code"] for row in instruments] == ["510300", "159915"]
+    assert instruments[0]["etf_name"] == "沪深300ETF"
+    mock_client.build_or_get_etf_pool.assert_called_once_with(force_refresh=True)
+    assert service.get_status()["backfilling"] is False
+
+
+def test_codes_from_spot_rows_and_backfill_hint_flag():
+    assert codes_from_spot_rows([{"代码": "sh512010", "名称": "医药ETF"}]) == [
+        {"etf_code": "512010", "etf_name": "医药ETF"}
+    ]
+    assert codes_from_spot_rows([]) == []
+    assert pool_is_backfilling({"backfilling": True, "last_error": None}, 0) is True
+    assert pool_is_backfilling({"backfilling": True, "last_error": None}, 4) is False
+    assert pool_is_backfilling({"backfilling": True, "last_error": "失败"}, 0) is False
+    assert pool_is_backfilling({"backfilling": False}, 0) is False
 
 
 def test_sync_status_api_endpoint():

@@ -15,6 +15,8 @@ import {
   filterByStoredSubsector,
   subsectorsForSector,
   aggregateSectorCounts,
+  maturityCounts,
+  backfillHint,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -133,6 +135,14 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (!poolData.backfilling) return undefined;
+    const timer = setInterval(() => {
+      fetchPoolData(undefined, { quiet: true });
+    }, 12000);
+    return () => clearInterval(timer);
+  }, [poolData.backfilling]);
+
   const fetchUnclassified = async (signal) => {
     try {
       const params = new URLSearchParams();
@@ -151,8 +161,8 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     }
   };
 
-  const fetchPoolData = async (signal) => {
-    setLoading(true);
+  const fetchPoolData = async (signal, options = {}) => {
+    if (!options.quiet) setLoading(true);
     try {
       const params = new URLSearchParams();
       params.append("min_ma20_amount", "3000");
@@ -172,7 +182,6 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     }
   };
 
-  // 1. 第一级派生：基于当前上市成熟度过滤的基准标的池 (5年: 256只 | 3年: 358只 | 全量: 537只)
   const maturePoolItems = useMemo(() => {
     const rawItems = poolData.items || [];
     if (maturityFilter === "5y") {
@@ -184,21 +193,11 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     return rawItems;
   }, [poolData.items, maturityFilter]);
 
-  // 成熟度胶囊对应的自适应计数
-  const maturity5yCount = useMemo(() => {
-    const list = poolData.items || [];
-    return list.filter((it) => it.is_valid_5y).length || poolData.valid_5y_total || 256;
-  }, [poolData.items, poolData.valid_5y_total]);
-
-  const maturity3yCount = useMemo(() => {
-    const list = poolData.items || [];
-    return list.filter((it) => it.is_valid_3y).length || poolData.valid_3y_total || 358;
-  }, [poolData.items, poolData.valid_3y_total]);
-
-  const maturityAllCount = useMemo(() => {
-    const list = poolData.items || [];
-    return list.length || poolData.total || 537;
-  }, [poolData.items, poolData.total]);
+  const maturity = useMemo(() => maturityCounts(poolData.items), [poolData.items]);
+  const maturity5yCount = maturity.y5;
+  const maturity3yCount = maturity.y3;
+  const maturityAllCount = maturity.all;
+  const poolBackfillHint = backfillHint(poolData.backfilling, maturityAllCount);
 
   // 当前成熟度基准池总数与 T+0 动态计数
   const currentMaturityTotal = maturePoolItems.length;
@@ -415,11 +414,13 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           </div>
         </div>
         <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
-          {maturityFilter === "5y"
+          {poolBackfillHint
+            ? poolBackfillHint
+            : maturityFilter === "5y"
             ? "已精选历经完整牛熊大考的元老标的，历史回测扎实"
             : maturityFilter === "3y"
             ? "涵盖满3年的高流动细分ETF，兼顾弹性与周期稳定性"
-            : "全市场537只高流动做T标的全景，含近两年上市的高弹性次新"}
+            : "当前库里的高流动做T标的，含近两年上市的高弹性次新"}
         </span>
       </div>
 
@@ -575,7 +576,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
         </div>
       ) : filteredItems.length === 0 ? (
         <div className="py-12 text-center text-gray-400 text-sm">
-          未匹配到符合条件的标的，可尝试切换其他细分赛道
+          {poolBackfillHint || "未匹配到符合条件的标的，可尝试切换其他细分赛道"}
         </div>
       ) : (
         <div className="space-y-3">

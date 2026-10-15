@@ -43,3 +43,19 @@ export function aggregateSectorCounts(items) {
   return map;
 }
 
+export function maturityCounts(items) {
+  const list = items || [];
+  return {
+    y5: list.filter((item) => item.is_valid_5y).length,
+    y3: list.filter((item) => item.is_valid_3y).length,
+    all: list.length,
+  };
+}
+
+export function backfillHint(backfilling, count) {
+  if (backfilling && !count) {
+    return "正在回补日K，完成后会自动出现标的";
+  }
+  return "";
+}
+

@@ -8,6 +8,8 @@ import {
   filterByStoredSubsector,
   subsectorsForSector,
   aggregateSectorCounts,
+  maturityCounts,
+  backfillHint,
 } from "./radarDisplay.js";
 
 test("default collapse limit is 6 items", () => {
@@ -46,6 +48,23 @@ test("subsector counts come from the catalog, including zeros", () => {
     subsectorsForSector(summary, "医药健康").map((item) => item.count),
     [1, 0]
   );
+});
+
+test("maturity badges stay at zero while the pool is empty", () => {
+  assert.deepEqual(maturityCounts([]), { y5: 0, y3: 0, all: 0 });
+  assert.deepEqual(maturityCounts(undefined), { y5: 0, y3: 0, all: 0 });
+  assert.equal(backfillHint(true, 0), "正在回补日K，完成后会自动出现标的");
+  assert.equal(backfillHint(false, 0), "");
+  assert.equal(backfillHint(true, 3), "");
+});
+
+test("maturity badges count the loaded rows", () => {
+  const counts = maturityCounts([
+    { is_valid_5y: true, is_valid_3y: true },
+    { is_valid_5y: false, is_valid_3y: true },
+    { is_valid_5y: false, is_valid_3y: false },
+  ]);
+  assert.deepEqual(counts, { y5: 1, y3: 2, all: 3 });
 });
 
 test("aggregateSectorCounts dynamically computes counts matching mature pool", () => {

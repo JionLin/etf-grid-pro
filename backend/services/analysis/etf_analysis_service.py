@@ -151,8 +151,18 @@ class ETFAnalysisService:
                 min_ma20_amount_10k=min_ma20_amount_10k,
                 min_atr_pct=min_atr_pct,
             ),
-            "items": items
+            "items": items,
+            "backfilling": self._pool_backfilling(len(items)),
         }
+
+    def _pool_backfilling(self, item_count: int) -> bool:
+        try:
+            from services.data.startup_sync_service import StartupSyncService, pool_is_backfilling
+
+            return pool_is_backfilling(StartupSyncService().get_status(), item_count)
+        except Exception as exc:
+            logger.warning("读取日K回补状态失败: %s", exc)
+            return False
 
     def get_etf_basic_info(self, etf_code: str) -> Dict:
         """

@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from repositories.market_data_repository import MarketDataRepository
 from repositories.db_config import db_type, sqlite_path
@@ -21,6 +21,31 @@ from services.data.universe_bar_sync_service import UniverseBarSyncService
 logger = logging.getLogger(__name__)
 
 LOCK_NAME = "etf_grid_startup_sync_lock"
+
+
+def pool_is_backfilling(status: Optional[Dict[str, Any]], item_count: int) -> bool:
+    """空池且启动同步仍在回补日 K 时，页面显示回补提示。失败后不再一直显示。"""
+    if item_count:
+        return False
+    snapshot = status or {}
+    if snapshot.get("last_error"):
+        return False
+    return bool(snapshot.get("backfilling"))
+
+
+def codes_from_spot_rows(rows: Optional[List[Dict[str, Any]]]) -> List[Dict[str, str]]:
+    """从全市场行情行抽出 6 位代码。空池启动时用这份列表回补日 K，不依赖已有标的池。"""
+    seen = set()
+    instruments: List[Dict[str, str]] = []
+    for row in rows or []:
+        raw = str(row.get("代码") or row.get("code") or "").lower()
+        code = raw.replace("sh", "").replace("sz", "").strip()
+        if len(code) != 6 or not code.isdigit() or code in seen:
+            continue
+        seen.add(code)
+        name = str(row.get("名称") or row.get("name") or code).strip() or code
+        instruments.append({"etf_code": code, "etf_name": name})
+    return instruments
 
 
 class StartupSyncService:
@@ -60,6 +85,7 @@ class StartupSyncService:
                 "last_error": None,
                 "synced_bars_count": 0,
                 "matrix_refreshed": False,
+                "backfilling": True,
             }
         self._initialized = True
 
@@ -198,22 +224,50 @@ class StartupSyncService:
             freshness = self.check_freshness()
             logger.info("启动数据新鲜度自检: %s", freshness)
 
-            if not force and not freshness["needs_bar_sync"] and not freshness["needs_matrix_refresh"]:
+            universe = self._current_shoppable_universe()
+            needs_seed = isinstance(universe, list) and len(universe) == 0
+            seed_instruments = None
+            if needs_seed:
+                seed_instruments = self.codes_from_market_list()
+                if not seed_instruments:
+                    logger.warning("标的池为空且市场列表没有代码，跳过日 K 回补。")
+                    self._set_status(
+                        is_syncing=False,
+                        current_stage="idle",
+                        backfilling=False,
+                        last_error="市场列表为空，未能回补日K",
+                    )
+                    return {"status": "skipped", "reason": "empty_market_list", "freshness": freshness}
+
+            if (
+                not force
+                and not needs_seed
+                and not freshness["needs_bar_sync"]
+                and not freshness["needs_matrix_refresh"]
+            ):
                 logger.info("本地日 K 线时序与回测矩阵已最新 (%s)，无需同步。", freshness["local_max_date"])
-                self._set_status(is_syncing=False, current_stage="idle")
+                self._set_status(is_syncing=False, current_stage="idle", backfilling=False)
                 return {"status": "skipped", "reason": "already_up_to_date", "freshness": freshness}
 
-            # 阶段 1: 增量拉取全市场 537 只 ETF 日 K 线
             total_added = 0
-            if freshness["needs_bar_sync"] or force:
-                self._set_status(current_stage="syncing_bars")
-                logger.info("→ 启动全市场 537 只 ETF 增量时序并发同步...")
+            if freshness["needs_bar_sync"] or force or needs_seed:
+                self._set_status(current_stage="syncing_bars", backfilling=needs_seed)
+                logger.info(
+                    "→ 启动 ETF 增量时序同步（%s）...",
+                    "空池先按市场列表回补" if needs_seed else "按已有标的池增量",
+                )
                 sync_res = self.sync_service.sync_universe(
+                    instruments=seed_instruments,
                     is_incremental=True,
                     workers=workers,
                 )
                 total_added = sum(r.get("rows_added", 0) for r in sync_res.get("results", []))
                 logger.info("✓ 增量同步完成: 成功补录 %d 条最新日线，跳过 %d 只已最新标的", total_added, sync_res.get("skipped", 0))
+                if needs_seed and seed_instruments:
+                    try:
+                        self.client.build_or_get_etf_pool(force_refresh=True)
+                    except Exception as exc:
+                        logger.warning("空池日 K 回补后重建标的池失败: %s", exc)
 
             # 阶段 2: 内存多周期回测并刷新 universe_matrix_backtest 表
             self._set_status(current_stage="calculating_matrix")
@@ -237,6 +291,8 @@ class StartupSyncService:
                 last_synced_at=now_str,
                 synced_bars_count=total_added,
                 matrix_refreshed=True,
+                backfilling=False,
+                last_error=None,
             )
             return {
                 "status": "success",
@@ -248,7 +304,12 @@ class StartupSyncService:
         except Exception as e:
             logger.error("启动同步管道执行异常: %s", e, exc_info=True)
             public_error = "启动同步失败，请查看服务端日志"
-            self._set_status(is_syncing=False, current_stage="failed", last_error=public_error)
+            self._set_status(
+                is_syncing=False,
+                current_stage="failed",
+                last_error=public_error,
+                backfilling=False,
+            )
             return {"status": "failed", "error": public_error}
         finally:
             if conn:
@@ -273,3 +334,24 @@ class StartupSyncService:
         thread.start()
         logger.info("✓ 已激活非阻塞后台启动自检守护线程 (延迟 %.1f 秒调度)", delay_seconds)
         return thread
+
+    def _current_shoppable_universe(self) -> Any:
+        getter = getattr(self.sync_service, "get_shoppable_universe", None)
+        if not callable(getter):
+            return None
+        try:
+            return getter()
+        except Exception as exc:
+            logger.warning("读取可购标的池失败: %s", exc)
+            return None
+
+    def codes_from_market_list(self) -> List[Dict[str, str]]:
+        loader = getattr(self.client, "_load_category_spot_rows", None)
+        if not callable(loader):
+            return []
+        try:
+            rows = loader()
+        except Exception as exc:
+            logger.warning("拉取市场列表失败，无法回补日K: %s", exc)
+            return []
+        return codes_from_spot_rows(rows)
