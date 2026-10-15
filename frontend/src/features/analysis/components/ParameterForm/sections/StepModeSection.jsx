@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import { TrendingUp, Sliders, RotateCcw, Plus, Minus, AlertTriangle } from "lucide-react";
+import { ATR_STEP_BUTTON_LABEL, EDA_STEP_BUTTON_LABEL } from "./stepModeLabels";
 
 /**
  * 步长生成模式微调区组件
@@ -123,7 +124,7 @@ const StepModeSection = memo(function StepModeSection({
           }`}
         >
           <div className="font-semibold text-xs text-indigo-950 dark:text-indigo-300 flex items-center gap-1">
-            <span>★ 🌊 ATR 动态自适应 (默认)</span>
+            <span>{ATR_STEP_BUTTON_LABEL}</span>
           </div>
           <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
             基于14日波幅自适应计算(小网~1.9%/中网~3.8%/大网~7.9%)，适合高频做T现金流
@@ -140,7 +141,7 @@ const StepModeSection = memo(function StepModeSection({
           }`}
         >
           <div className="font-semibold text-xs text-amber-950 dark:text-amber-300 flex items-center gap-1">
-            <span>🏛️ E大原版经典大步长</span>
+            <span>{EDA_STEP_BUTTON_LABEL}</span>
           </div>
           <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
             默认小网 5% / 中网 15% / 大网 30%，跨度宏大、适合长周期守株待兔
