@@ -96,6 +96,7 @@ class ETFAnalysisService:
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
+        commodity_exempt: bool = False,
         force_refresh: bool = False
     ) -> Dict[str, Any]:
         """获取全市场做 T ETF 标的池及赛道分布统计（默认月均成交额 >= 3000 万元，ATR >= 1.5%）"""
@@ -119,6 +120,7 @@ class ETFAnalysisService:
             min_amount_10k=min_amount_10k,
             min_ma20_amount_10k=min_ma20_amount_10k,
             min_atr_pct=min_atr_pct,
+            commodity_exempt=commodity_exempt,
             limit=600
         )
         self.akshare_client.attach_quote_dates(items)

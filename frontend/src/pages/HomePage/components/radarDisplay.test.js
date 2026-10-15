@@ -11,6 +11,8 @@ import {
   maturityCounts,
   backfillHint,
   storageBadge,
+  poolAtrParams,
+  atrFloorLabel,
 } from "./radarDisplay.js";
 
 test("default collapse limit is 6 items", () => {
@@ -49,6 +51,12 @@ test("subsector counts come from the catalog, including zeros", () => {
     subsectorsForSector(summary, "医药健康").map((item) => item.count),
     [1, 0]
   );
+});
+
+test("atr floor can drop to 1.0 and labels the commodity exemption", () => {
+  assert.deepEqual(poolAtrParams("1.5", false), { min_atr: "1.5", commodity_exempt: "0" });
+  assert.deepEqual(poolAtrParams("1.0", true), { min_atr: "1.0", commodity_exempt: "1" });
+  assert.equal(atrFloorLabel("1.0", true), "波幅门槛 1.0%，黄金/大宗商品按 1.0% 豁免");
 });
 
 test("storage badge follows the configured database", () => {

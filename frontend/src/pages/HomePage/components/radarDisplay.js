@@ -52,6 +52,19 @@ export function maturityCounts(items) {
   };
 }
 
+export function poolAtrParams(minAtr, commodityExempt) {
+  const floor = String(minAtr) === "1.0" ? "1.0" : "1.5";
+  return {
+    min_atr: floor,
+    commodity_exempt: commodityExempt ? "1" : "0",
+  };
+}
+
+export function atrFloorLabel(minAtr, commodityExempt) {
+  const floor = String(minAtr) === "1.0" ? "1.0%" : "1.5%";
+  return commodityExempt ? `波幅门槛 ${floor}，黄金/大宗商品按 1.0% 豁免` : `波幅门槛 ${floor}`;
+}
+
 export function storageBadge(label) {
   if (label === "本机 SQLite" || label === "本机 MySQL") {
     return `${label} 直出`;

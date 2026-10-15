@@ -1332,7 +1332,7 @@ class AkShareClient:
                     continue
 
                 # 3. 第三重护城河：14 日 ATR 来自本地日 K。样本不够不借用名称波幅。
-                if not metrics["atr_sufficient"] or metrics["atr_pct"] < min_atr_pct:
+                if not metrics["atr_sufficient"] or metrics["atr_pct"] < min(float(min_atr_pct), 1.0):
                     continue
 
                 if unusable:

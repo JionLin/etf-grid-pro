@@ -18,6 +18,8 @@ import {
   maturityCounts,
   backfillHint,
   storageBadge,
+  poolAtrParams,
+  atrFloorLabel,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -36,6 +38,8 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   const [showUnclassified, setShowUnclassified] = useState(false);
   const [unclassifiedItems, setUnclassifiedItems] = useState([]);
   const [maturityFilter, setMaturityFilter] = useState("5y"); // 默认展示满 5 年期 (历经完整牛熊)
+  const [minAtr, setMinAtr] = useState("1.5");
+  const [commodityExempt, setCommodityExempt] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false); // 默认收拢，仅展示前 6 只精选
 
   // 搜索历史状态
@@ -134,7 +138,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     const controller = new AbortController();
     fetchPoolData(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [minAtr, commodityExempt]);
 
   useEffect(() => {
     if (!poolData.backfilling) return undefined;
@@ -149,7 +153,9 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
       const params = new URLSearchParams();
       params.append("sector", "未归类");
       params.append("min_ma20_amount", "3000");
-      params.append("min_atr", "1.5");
+      const atr = poolAtrParams(minAtr, commodityExempt);
+      params.append("min_atr", atr.min_atr);
+      params.append("commodity_exempt", atr.commodity_exempt);
       const res = await fetch(`/api/etf/pool?${params.toString()}`, { signal });
       const json = await res.json();
       if (signal?.aborted) return;
@@ -167,7 +173,10 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     try {
       const params = new URLSearchParams();
       params.append("min_ma20_amount", "3000");
-      params.append("min_atr", "1.5");
+      const atr = poolAtrParams(minAtr, commodityExempt);
+      params.append("min_atr", atr.min_atr);
+      params.append("commodity_exempt", atr.commodity_exempt);
+      if (options.refresh) params.append("refresh", "1");
 
       const res = await fetch(`/api/etf/pool?${params.toString()}`, { signal });
       const json = await res.json();
@@ -313,7 +322,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1.5 flex items-center gap-1.5">
             <span>🛡️</span>
             <span>
-              三重品质护城河：已自动过滤上市未满 3 年次新、月均成交低于 3,000 万元及波幅低于 1.5% 的死水标的，精选高胜率做 T 标的池
+              三重品质护城河：已过滤上市未满 3 年次新、月均成交低于 3,000 万元的标的。{atrFloorLabel(minAtr, commodityExempt)}。
             </span>
           </p>
         </div>
@@ -522,6 +531,35 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             <span>⚡</span>
             <span>仅看日内 T+0 ({currentT0Count}只)</span>
           </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-gray-500 dark:text-gray-400">ATR 门槛:</span>
+          {[
+            ["1.5", "1.5% 默认"],
+            ["1.0", "放宽到 1.0%"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setMinAtr(value)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium ${
+                minAtr === value
+                  ? "bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold"
+                  : "text-gray-600 dark:text-gray-400"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={commodityExempt}
+              onChange={(event) => setCommodityExempt(event.target.checked)}
+            />
+            黄金/大宗商品豁免到 1.0%
+          </label>
         </div>
 
         {/* ATR 弹性档位 */}

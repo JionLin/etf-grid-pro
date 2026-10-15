@@ -100,6 +100,9 @@ def get_etf_pool():
         min_amount = float(request.args.get('min_amount', 0.0))
         min_ma20_amount = float(request.args.get('min_ma20_amount', 3000.0))
         min_atr = float(request.args.get('min_atr', 1.5))
+        if min_atr < 1.0:
+            min_atr = 1.0
+        commodity_exempt = request.args.get('commodity_exempt') in ('1', 'true', 'True')
         force_refresh = request.args.get('refresh') in ('true', '1')
 
         pool_data = etf_service.get_etf_pool(
@@ -110,6 +113,7 @@ def get_etf_pool():
             min_amount_10k=min_amount,
             min_ma20_amount_10k=min_ma20_amount,
             min_atr_pct=min_atr,
+            commodity_exempt=commodity_exempt,
             force_refresh=force_refresh
         )
         return jsonify({

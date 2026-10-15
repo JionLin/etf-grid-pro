@@ -174,11 +174,13 @@ class ETFPoolRepository:
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
+        commodity_exempt: bool = False,
         limit: int = 600,
     ) -> List[Dict[str, Any]]:
         try:
             query, params = self._pool_query(
-                sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20_amount_10k, min_atr_pct, limit
+                sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20_amount_10k, min_atr_pct, limit,
+                commodity_exempt=commodity_exempt,
             )
             conn = self._connect()
             try:
@@ -192,12 +194,29 @@ class ETFPoolRepository:
             logger.error("查询标的池失败: %s", exc)
             return []
 
-    def _pool_query(self, sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20, min_atr, limit):
+    def _pool_query(
+        self,
+        sector,
+        is_t0,
+        elasticity,
+        subsector,
+        min_amount_10k,
+        min_ma20,
+        min_atr,
+        limit,
+        commodity_exempt: bool = False,
+    ):
+        if commodity_exempt:
+            atr_sql = "(atr_pct >= %s OR (sector = %s AND atr_pct >= %s))"
+            atr_params: List[Any] = [min_atr, "大宗商品", min(float(min_atr), 1.0)]
+        else:
+            atr_sql = "atr_pct >= %s"
+            atr_params = [min_atr]
         query = (
             "SELECT * FROM etf_instrument "
-            "WHERE amount_ma20_10k >= %s AND amount_10k >= %s AND atr_pct >= %s"
+            f"WHERE amount_ma20_10k >= %s AND amount_10k >= %s AND {atr_sql}"
         )
-        params: List[Any] = [min_ma20, min_amount_10k, min_atr]
+        params: List[Any] = [min_ma20, min_amount_10k, *atr_params]
         if sector and sector != "全部":
             query += " AND sector = %s"
             params.append(sector)
