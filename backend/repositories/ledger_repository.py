@@ -11,6 +11,7 @@ from services.analysis.order_ledger import (
 )
 from services.data.market_clock import shanghai_now
 
+from .db_config import is_sqlite
 from .mysql_connection import DEFAULT_DATABASE, connect
 from .mysql_schema import ensure_database
 
@@ -36,7 +37,7 @@ def _incoming_orders(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "note": note,
             "rail": rail,
             "role": role,
-            "key": order_key(side, price, shares),
+            "key": order_key(side, price, shares, rail),
         })
     return incoming
 
@@ -49,7 +50,7 @@ def _stale_posted(existing: List[Dict[str, Any]], incoming: List[Dict[str, Any]]
     for row in existing:
         if row["status"] != "已挂":
             continue
-        key = order_key(row["side"], row["trigger_price"], row["shares"])
+        key = order_key(row["side"], row["trigger_price"], row["shares"], row.get("rail") or "")
         if remaining.get(key, 0) > 0:
             remaining[key] -= 1
             continue
@@ -64,6 +65,25 @@ class LedgerRepository:
 
     def _connect(self):
         return connect(self.database)
+
+    def _ensure_rail_column(self, cursor) -> None:
+        if is_sqlite():
+            cursor.execute("PRAGMA table_info(grid_ledger_order)")
+            names = {row["name"] for row in cursor.fetchall()}
+            if "rail" not in names:
+                cursor.execute("ALTER TABLE grid_ledger_order ADD COLUMN rail TEXT NOT NULL DEFAULT ''")
+            return
+        cursor.execute(
+            """
+            SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'grid_ledger_order' AND COLUMN_NAME = 'rail'
+            """,
+            (self.database,),
+        )
+        if cursor.fetchone() is None:
+            cursor.execute(
+                "ALTER TABLE grid_ledger_order ADD COLUMN rail VARCHAR(32) NOT NULL DEFAULT '' COMMENT '所属网格'"
+            )
 
     def save_plan(
         self,
@@ -86,13 +106,14 @@ class LedgerRepository:
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
+                self._ensure_rail_column(cursor)
                 cursor.execute("SELECT id FROM grid_ledger_plan WHERE etf_code = %s", (code,))
                 plan_row = cursor.fetchone()
                 existing: List[Dict[str, Any]] = []
                 if plan_row:
                     cursor.execute(
                         """
-                        SELECT id, side, trigger_price, shares, note, status
+                        SELECT id, side, trigger_price, shares, note, rail, status
                         FROM grid_ledger_order WHERE plan_id = %s
                         """,
                         (int(plan_row["id"]),),
@@ -134,21 +155,21 @@ class LedgerRepository:
                     for row in existing:
                         if row["id"] in used:
                             continue
-                        if order_key(row["side"], row["trigger_price"], row["shares"]) == order["key"]:
+                        if order_key(row["side"], row["trigger_price"], row["shares"], row.get("rail") or "") == order["key"]:
                             match = row
                             break
                     if match:
                         used.add(match["id"])
                         cursor.execute(
-                            "UPDATE grid_ledger_order SET note = %s, updated_at = %s WHERE id = %s",
-                            (order["note"], now, match["id"]),
+                            "UPDATE grid_ledger_order SET note = %s, rail = %s, updated_at = %s WHERE id = %s",
+                            (order["note"], order["rail"], now, match["id"]),
                         )
                     else:
                         cursor.execute(
                             """
                             INSERT INTO grid_ledger_order
-                                (plan_id, side, trigger_price, shares, note, status, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                (plan_id, side, trigger_price, shares, note, rail, status, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                             (
                                 plan_id,
@@ -156,6 +177,7 @@ class LedgerRepository:
                                 order["price"],
                                 order["shares"],
                                 order["note"],
+                                order["rail"],
                                 initial_status(order["note"], order["rail"], order["role"]),
                                 now,
                             ),
@@ -196,13 +218,14 @@ class LedgerRepository:
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
+                self._ensure_rail_column(cursor)
                 cursor.execute("SELECT * FROM grid_ledger_plan WHERE etf_code = %s", (code,))
                 plan = cursor.fetchone()
                 if not plan:
                     return {"etf_code": code, "orders": []}
                 cursor.execute(
                     """
-                    SELECT id, side, trigger_price, shares, note, status
+                    SELECT id, side, trigger_price, shares, note, rail, status
                     FROM grid_ledger_order
                     WHERE plan_id = %s
                     ORDER BY trigger_price DESC, id ASC
@@ -219,6 +242,7 @@ class LedgerRepository:
                         current_price,
                         item["status"],
                         note=item.get("note") or "",
+                        rail=item.get("rail") or "",
                     )
                     orders.append(item)
         finally:

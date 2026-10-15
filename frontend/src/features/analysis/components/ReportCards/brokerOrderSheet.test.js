@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { brokerOrderRecords, buildBrokerOrderSheet } from "./brokerOrderSheet.js";
+import { brokerOrderRecords, buildBrokerOrderSheet, ledgerOrderRecords } from "./brokerOrderSheet.js";
 
 test("broker sheet keeps the base position on its own row and merges same-price orders", () => {
   const sheet = buildBrokerOrderSheet({
@@ -32,4 +32,24 @@ test("broker sheet keeps the base position on its own row and merges same-price 
   });
   assert.equal(records[0].note.includes("底仓"), true);
   assert.equal(records[1].shares, 700);
+});
+
+test("ledger keeps one row per track while the broker sheet still merges", () => {
+  const orders = [
+    { action: "BUY", price: 1.28, shares: 500, tag: "中网" },
+    { action: "BUY", price: 1.28, shares: 500, tag: "大网" },
+  ];
+  const broker = brokerOrderRecords({ orders });
+  assert.equal(broker.length, 1);
+  assert.equal(broker[0].shares, 1000);
+  const ledger = ledgerOrderRecords({
+    orders,
+    basePosition: { shares: 12000, current_price: 1.25 },
+  });
+  assert.equal(ledger.length, 3);
+  assert.equal(ledger[0].rail, "底仓");
+  assert.equal(ledger[0].role, "base");
+  assert.deepEqual(ledger.slice(1).map((row) => row.rail), ["中网", "大网"]);
+  assert.equal(ledger[1].shares, 500);
+  assert.equal(ledger[2].shares, 500);
 });

@@ -51,6 +51,36 @@ export function brokerOrderRecords({ orders, basePosition, anchorPrice } = {}) {
   return records;
 }
 
+export function ledgerOrderRecords({ orders, basePosition, anchorPrice } = {}) {
+  const records = [];
+  const baseShares = Math.round(Number(basePosition?.shares) || 0);
+  if (baseShares > 0) {
+    records.push({
+      side: "买入",
+      role: "base",
+      rail: "底仓",
+      trigger_price: Number(priceText(basePosition.current_price || basePosition.price || anchorPrice)),
+      shares: baseShares,
+      note: "底仓，单独下单，不是网格条件单",
+    });
+  }
+  (orders || []).forEach((order) => {
+    const shares = Math.round(Number(order.shares) || 0);
+    const price = Number(priceText(order.price));
+    if (shares <= 0 || !(price > 0)) return;
+    const rail = railLabel(order);
+    records.push({
+      side: sideLabel(order),
+      role: "grid",
+      rail,
+      trigger_price: price,
+      shares,
+      note: rail,
+    });
+  });
+  return records;
+}
+
 export function buildBrokerOrderSheet({ code, orders, basePosition, anchorPrice } = {}) {
   const symbol = String(code || "").trim();
   const rows = [["代码", "方向", "触发价", "股数", "备注"]];

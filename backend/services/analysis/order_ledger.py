@@ -51,8 +51,8 @@ class StalePostedOrders(ValueError):
         super().__init__("旧的已挂单不在新网格里")
 
 
-def order_key(side: str, trigger_price: float, shares: int) -> tuple:
-    return (normalize_side(side), round(float(trigger_price), 3), int(shares))
+def order_key(side: str, trigger_price: float, shares: int, rail: str = "") -> tuple:
+    return (normalize_side(side), round(float(trigger_price), 3), int(shares), str(rail or ""))
 
 
 def may_fill_today(

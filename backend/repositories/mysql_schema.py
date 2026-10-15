@@ -237,7 +237,8 @@ _STATEMENTS = (
         trigger_price DOUBLE NOT NULL COMMENT '触发价',
         shares INT NOT NULL COMMENT '股数',
         note VARCHAR(255) NOT NULL DEFAULT '' COMMENT '备注，如同价合并或底仓',
-        status VARCHAR(8) NOT NULL DEFAULT '未挂' COMMENT '未挂、已挂、已成、作废',
+        rail VARCHAR(32) NOT NULL DEFAULT '' COMMENT '所属网格。账本按网各占一行，底仓为底仓',
+        status VARCHAR(8) NOT NULL DEFAULT '未挂' COMMENT '未挂、已挂、已成、作废、待买入',
         updated_at VARCHAR(32) NULL COMMENT '最近状态时间，东八区本地时间字符串',
         PRIMARY KEY (id),
         KEY idx_ledger_order_plan (plan_id)

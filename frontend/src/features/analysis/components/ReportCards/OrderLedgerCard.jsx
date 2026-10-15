@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { brokerOrderRecords } from "./brokerOrderSheet";
+import { ledgerOrderRecords } from "./brokerOrderSheet";
 
 const GRID_STATUSES = ["未挂", "已挂", "已成", "作废"];
 const BASE_STATUSES = ["待买入", "已成", "作废"];
@@ -51,7 +51,7 @@ export default function OrderLedgerCard({
           shares: basePosition?.shares || 0,
           price: basePosition?.current_price || anchorPrice,
         },
-        orders: brokerOrderRecords({ orders, basePosition, anchorPrice }),
+        orders: ledgerOrderRecords({ orders, basePosition, anchorPrice }),
       }),
     });
     const json = await res.json();
