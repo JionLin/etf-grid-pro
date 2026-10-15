@@ -30,6 +30,20 @@ def pool_rank_score(atr_pct: float, amount_ma20_10k: float, cash_yield: Optional
     return round(atr * 10.0 + turnover / 5000.0, 1), "spread"
 
 
+def rank_pool_items(items: Iterable[Dict[str, Any]]) -> list:
+    """年化做T 和价差分分开排序。有年化做T的在前，各自内部按分数从高到低。"""
+    rows = list(items or [])
+    cash = [item for item in rows if item.get("score_kind") == "cash_yield"]
+    spread = [item for item in rows if item.get("score_kind") != "cash_yield"]
+
+    def score_of(item: Dict[str, Any]) -> float:
+        return float(item.get("score") or 0)
+
+    cash.sort(key=score_of, reverse=True)
+    spread.sort(key=score_of, reverse=True)
+    return cash + spread
+
+
 def elasticity_from_atr(atr_pct: float) -> str:
     """按真实 ATR 百分比划分弹性档。
 

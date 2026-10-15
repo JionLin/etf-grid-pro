@@ -14,6 +14,7 @@ import {
   poolAtrParams,
   atrFloorLabel,
   rankBadge,
+  rankPoolItems,
 } from "./radarDisplay.js";
 
 test("default collapse limit is 6 items", () => {
@@ -52,6 +53,15 @@ test("subsector counts come from the catalog, including zeros", () => {
     subsectorsForSector(summary, "医药健康").map((item) => item.count),
     [1, 0]
   );
+});
+
+test("cash yield and spread stay on separate ranking scales", () => {
+  const ordered = rankPoolItems([
+    { etf_code: "588000", score: 42, score_kind: "spread" },
+    { etf_code: "515220", score: 8.9, score_kind: "cash_yield" },
+    { etf_code: "512400", score: 12.6, score_kind: "cash_yield" },
+  ]);
+  assert.deepEqual(ordered.map((item) => item.etf_code), ["512400", "515220", "588000"]);
 });
 
 test("rank badge uses cash yield and drawdown instead of a saturated score", () => {

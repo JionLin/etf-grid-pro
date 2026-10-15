@@ -139,7 +139,9 @@ class ETFAnalysisService:
             logger.warning(f"补齐标的成熟度标记失败: {e}")
 
         self._attach_rank_scores(items)
-        items.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
+        from services.data.bar_metrics import rank_pool_items
+
+        items = rank_pool_items(items)
 
         summary = self.akshare_client.pool_repo.get_sectors_summary(
             min_ma20_amount_10k=min_ma20_amount_10k,

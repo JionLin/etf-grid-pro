@@ -52,6 +52,22 @@ export function maturityCounts(items) {
   };
 }
 
+export function rankPoolItems(items) {
+  const cash = [];
+  const spread = [];
+  (items || []).forEach((item) => {
+    if (item && item.score_kind === "cash_yield") {
+      cash.push(item);
+    } else {
+      spread.push(item);
+    }
+  });
+  const byScore = (left, right) => Number(right.score || 0) - Number(left.score || 0);
+  cash.sort(byScore);
+  spread.sort(byScore);
+  return cash.concat(spread);
+}
+
 export function rankBadge(item) {
   if (!item || item.score === undefined || item.score === null || item.score === "") {
     return "";

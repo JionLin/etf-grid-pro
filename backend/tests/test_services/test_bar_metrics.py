@@ -121,6 +121,18 @@ def test_incremental_sync_refetches_when_last_close_is_missing(monkeypatch):
     assert done["status"] == "skipped"
 
 
+def test_cash_yield_and_spread_are_ranked_on_separate_scales():
+    from backend.services.data.bar_metrics import rank_pool_items
+
+    ordered = rank_pool_items([
+        {"etf_code": "588000", "score": 42.0, "score_kind": "spread"},
+        {"etf_code": "515220", "score": 8.9, "score_kind": "cash_yield"},
+        {"etf_code": "512400", "score": 12.6, "score_kind": "cash_yield"},
+        {"etf_code": "510300", "score": 18.0, "score_kind": "spread"},
+    ])
+    assert [item["etf_code"] for item in ordered] == ["512400", "515220", "588000", "510300"]
+
+
 def test_rank_score_uses_cash_yield_and_does_not_saturate():
     from backend.services.data.bar_metrics import pool_rank_score
     from backend.services.analysis.backtest_engine import closed_loop_win_rate

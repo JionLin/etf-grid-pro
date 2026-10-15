@@ -21,6 +21,7 @@ import {
   poolAtrParams,
   atrFloorLabel,
   rankBadge,
+  rankPoolItems,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -258,7 +259,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
       );
     }
 
-    return result;
+    return rankPoolItems(result);
   }, [
     maturePoolItems,
     selectedSector,
@@ -613,12 +614,23 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
               {searchKeyword.trim() ? " 搜索只作用于已返回列表，不是全宇宙。" : ""}
             </p>
           )}
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            有年化做T的标的单独排序；没有年化做T的只按价差分排在后面，两把尺子不混用。
+          </p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {renderedItems.map((item) => {
+          {renderedItems.map((item, index) => {
+            const opensSpreadGroup = item.score_kind !== "cash_yield"
+              && renderedItems.slice(0, index).some((row) => row.score_kind === "cash_yield")
+              && renderedItems.slice(0, index).every((row) => row.score_kind === "cash_yield");
             const isUp = item.pct_change >= 0;
             return (
+              <React.Fragment key={item.etf_code}>
+              {opensSpreadGroup && (
+                <p className="col-span-full text-xs font-semibold text-slate-500 dark:text-slate-400 pt-2">
+                  以下只有价差分，不与年化做T混排
+                </p>
+              )}
               <div
-                key={item.etf_code}
                 onClick={() => {
                   handleRecordHistory(item);
                   if (onSelectETF) onSelectETF(item.etf_code, item);
@@ -726,6 +738,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                   <span>快速测算 (载入右侧)</span>
                 </button>
               </div>
+              </React.Fragment>
             );
           })}
         </div>
