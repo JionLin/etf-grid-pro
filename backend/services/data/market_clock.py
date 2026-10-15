@@ -113,6 +113,54 @@ def quote_date_label(now: datetime, trading_days: Optional[Iterable[str]] = None
     return day.strftime("%Y-%m-%d")
 
 
+def last_completed_trading_day(
+    now: Optional[datetime] = None,
+    trading_days: Optional[Iterable[str]] = None,
+) -> str:
+    """最后一个已经收盘的交易日。15:00 前当天这根 K 线还没走完。"""
+    current = as_shanghai(now)
+    before_close = current.strftime("%H:%M") < MARKET_CLOSE
+    day = current
+    if is_trading_day(day, trading_days) and not before_close:
+        return day.strftime("%Y-%m-%d")
+    if is_trading_day(day, trading_days) and before_close:
+        day = day - timedelta(days=1)
+    for _ in range(16):
+        if is_trading_day(day, trading_days):
+            return day.strftime("%Y-%m-%d")
+        day = day - timedelta(days=1)
+    return day.strftime("%Y-%m-%d")
+
+
+def _clock_label(value: object) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value).strip()
+
+
+def bar_saved_before_close(
+    trade_date: object,
+    created_at: object = None,
+    moment: Optional[datetime] = None,
+) -> bool:
+    """当天 K 线还没收盘，或入库时间早于 15:00（含没有入库时间的旧数据）。"""
+    now = as_shanghai(moment) if moment is not None else shanghai_now()
+    if hasattr(trade_date, "strftime"):
+        label = trade_date.strftime("%Y-%m-%d")
+    else:
+        label = str(trade_date)[:10]
+    if label != now.strftime("%Y-%m-%d"):
+        return False
+    if now.strftime("%H:%M") < MARKET_CLOSE:
+        return True
+    stamp = _clock_label(created_at)
+    if len(stamp) < 16:
+        return True
+    return stamp[11:16] < MARKET_CLOSE
+
+
 def expected_settled_date(
     now: Optional[datetime] = None,
     trading_days: Optional[Iterable[str]] = None,

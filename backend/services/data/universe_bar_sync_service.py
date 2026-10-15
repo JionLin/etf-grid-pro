@@ -10,7 +10,7 @@ from repositories.etf_pool_repository import ETFPoolRepository
 from repositories.market_data_repository import MarketDataRepository
 from services.data.akshare_client import AkShareClient
 from services.data.bar_metrics import drop_unfinished_session_bar
-from services.data.market_clock import SHANGHAI, as_shanghai
+from services.data.market_clock import SHANGHAI, as_shanghai, last_completed_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -56,46 +56,34 @@ class UniverseBarSyncService:
         target_start = start_date or def_start
         target_end = end_date or def_end
 
-        # 检查本地已有状态
+        # 收盘前留下的当天 K 线不能当成已完成，先删掉再判断要不要补。
+        self.market_repo.delete_preclose_session_bars(etf_code=clean_code)
         local_stat = self.market_repo.get_date_range(clean_code)
         local_count = local_stat.get("total_count", 0)
         local_min = local_stat.get("min_date")
         local_max = local_stat.get("max_date")
+        completed = last_completed_trading_day()
 
-        # 智能断点续传与增量跳过判定
         if not force_reload and local_count > 0 and local_max:
-            latest_dt = datetime.strptime(local_max, "%Y-%m-%d")
-            now = as_shanghai(datetime.now(SHANGHAI)).replace(tzinfo=None)
-            days_lag = (now - latest_dt).days
-            is_weekend = now.weekday() >= 5
-            
-            # 增量模式：如果本地最新日期是最近 3 天（或周末 <=4 天），说明已处于最新交易日，无需拉取
+            latest_text = str(local_max)[:10]
+            latest_dt = datetime.strptime(latest_text, "%Y-%m-%d")
+            if latest_text == completed and (
+                is_incremental or local_count >= 1000 or (local_min and local_min <= target_start)
+            ):
+                return {
+                    "etf_code": clean_code,
+                    "status": "skipped",
+                    "rows_added": 0,
+                    "total_rows": local_count,
+                    "min_date": local_min,
+                    "max_date": local_max,
+                    "error": None,
+                }
             if is_incremental:
-                if days_lag <= 3 or (is_weekend and days_lag <= 4):
-                    return {
-                        "etf_code": clean_code,
-                        "status": "skipped",
-                        "rows_added": 0,
-                        "total_rows": local_count,
-                        "min_date": local_min,
-                        "max_date": local_max,
-                        "error": None,
-                    }
-                # 确实落后时，增量起始日期从本地最新日期的次日开始
-                target_start = (latest_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-
-            # 全量模式：覆盖超过 1000 条且最新日期在最近几天，或最早日期已早于目标起始日且最新日期在最近几天
-            elif local_count >= 1000 or (local_min and local_min <= target_start):
-                if days_lag <= 7:
-                    return {
-                        "etf_code": clean_code,
-                        "status": "skipped",
-                        "rows_added": 0,
-                        "total_rows": local_count,
-                        "min_date": local_min,
-                        "max_date": local_max,
-                        "error": None,
-                    }
+                if latest_text > completed:
+                    target_start = completed
+                else:
+                    target_start = (latest_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
         # 通过重试拉取数据
         last_error = None

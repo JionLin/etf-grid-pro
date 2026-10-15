@@ -2,10 +2,12 @@
 from datetime import datetime, timezone
 
 from backend.services.data.market_clock import (
+    bar_saved_before_close,
     expected_settled_date,
     gap_is_only_non_trading,
     in_continuous_session,
     is_market_closed,
+    last_completed_trading_day,
     quote_date_label,
     spot_quote_unusable,
 )
@@ -33,6 +35,20 @@ def test_preopen_zero_price_or_turnover_is_unusable():
     assert spot_quote_unusable(0, 1000, weekend) is True
     assert spot_quote_unusable(1.303, 0, in_session) is False
     assert spot_quote_unusable(0, 1000, in_session) is True
+
+
+def test_freshness_uses_the_last_completed_trading_day():
+    morning = datetime(2026, 10, 15, 11, 0)
+    after_close = datetime(2026, 10, 15, 15, 0)
+    monday_morning = datetime(2026, 10, 12, 10, 0)
+    assert last_completed_trading_day(morning) == "2026-10-14"
+    assert last_completed_trading_day(after_close) == "2026-10-15"
+    assert last_completed_trading_day(monday_morning) == "2026-10-09"
+    assert bar_saved_before_close("2026-10-15", "2026-10-15 11:20:00", after_close) is True
+    assert bar_saved_before_close("2026-10-15", None, after_close) is True
+    assert bar_saved_before_close("2026-10-15", "2026-10-15 15:05:00", after_close) is False
+    assert bar_saved_before_close("2026-10-14", "2026-10-14 11:00:00", after_close) is False
+    assert bar_saved_before_close("2026-10-15", "2026-10-15 15:05:00", morning) is True
 
 
 def test_holiday_uses_calendar_and_weekend_fallback_stays():

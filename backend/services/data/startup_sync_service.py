@@ -15,7 +15,12 @@ from repositories.mysql_connection import DEFAULT_DATABASE, connect
 from repositories.universe_matrix_repository import UniverseMatrixRepository
 from services.analysis.universe_matrix_backtest_service import UniverseMatrixBacktestService
 from services.data.akshare_client import AkShareClient
-from services.data.market_clock import as_shanghai, expected_settled_date, shanghai_now
+from services.data.market_clock import (
+    as_shanghai,
+    expected_settled_date,
+    last_completed_trading_day,
+    shanghai_now,
+)
 from services.data.universe_bar_sync_service import UniverseBarSyncService
 
 logger = logging.getLogger(__name__)
@@ -116,7 +121,7 @@ class StartupSyncService:
         loader = getattr(getattr(self, "client", None), "cached_trading_days", None)
         if callable(loader):
             trading_days = loader(moment)
-        expected_date = self.calculate_expected_settled_date(now, trading_days)
+        expected_date = last_completed_trading_day(moment, trading_days)
 
         # 1. 检查代表性核心标的 510300 及全库的最大收录日期
         range_stat = self.market_repo.get_date_range("510300")
@@ -221,6 +226,9 @@ class StartupSyncService:
                 return {"status": "skipped", "reason": "lock_held_by_another_process"}
 
             self._set_status(is_syncing=True, current_stage="checking", last_error=None)
+            removed = self.market_repo.delete_preclose_session_bars()
+            if removed:
+                logger.info("已清除 %s 根收盘前写入的当日 K 线，等待正式收盘覆盖。", removed)
             freshness = self.check_freshness()
             logger.info("启动数据新鲜度自检: %s", freshness)
 

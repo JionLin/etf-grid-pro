@@ -85,6 +85,42 @@ def test_sync_does_not_store_today_before_close(monkeypatch):
     assert result["status"] == "synced"
 
 
+def test_incremental_sync_refetches_when_last_close_is_missing(monkeypatch):
+    from backend.services.data import market_clock
+
+    monkeypatch.setattr(
+        "services.data.market_clock.shanghai_now",
+        lambda: datetime(2026, 10, 15, 16, 0, tzinfo=market_clock.SHANGHAI),
+    )
+    fresh = pd.DataFrame({
+        "trade_date": [pd.Timestamp("2026-10-15")],
+        "open": [1.28],
+        "close": [1.303],
+        "high": [1.31],
+        "low": [1.27],
+        "vol": [100.0],
+        "amount": [1000.0],
+    })
+    client = MagicMock()
+    client._get_fallback_kline.return_value = fresh
+    market_repo = MagicMock()
+    market_repo.get_date_range.return_value = {
+        "total_count": 20,
+        "min_date": "2020-03-02",
+        "max_date": "2026-10-14",
+    }
+    market_repo.save_bars.return_value = 1
+    service = UniverseBarSyncService(market_repo=market_repo, pool_repo=MagicMock(), client=client)
+    result = service.sync_single_etf("515220", is_incremental=True)
+    assert result["status"] == "synced"
+    market_repo.delete_preclose_session_bars.assert_called_once()
+    client._get_fallback_kline.assert_called_once()
+
+    market_repo.get_date_range.return_value["max_date"] = "2026-10-15"
+    done = service.sync_single_etf("515220", is_incremental=True)
+    assert done["status"] == "skipped"
+
+
 def test_rank_score_uses_cash_yield_and_does_not_saturate():
     from backend.services.data.bar_metrics import pool_rank_score
     from backend.services.analysis.backtest_engine import closed_loop_win_rate

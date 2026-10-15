@@ -181,6 +181,7 @@ class AkShareClient:
         3. 从本地 SQLite 直出切片
         """
         clean_code = etf_code.split(".")[0]
+        self.market_repo.delete_preclose_session_bars(etf_code=clean_code)
         norm_start = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}" if len(start_date) == 8 else start_date
         norm_end = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}" if len(end_date) == 8 else end_date
         est_target_days = int(days * 242 / 365) if days > 30 else days

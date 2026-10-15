@@ -89,6 +89,37 @@ class TestMarketDataRepository(unittest.TestCase):
         self.assertEqual(len(df), 1)
         self.assertEqual(df.iloc[0]["trade_date"].strftime("%Y-%m-%d"), "2026-10-14")
 
+    def test_startup_drops_today_bar_captured_before_close(self):
+        """15:00 后，上午写入的当日 K 线要删掉，收盘后写入的留下。"""
+        afternoon = datetime(2026, 10, 15, 15, 10)
+        with patch("services.data.market_clock.shanghai_now", return_value=afternoon):
+            self.repo.save_bars("515220", [
+                {"trade_date": "2026-10-14", "open": 1.2, "close": 1.303},
+                {"trade_date": "2026-10-15", "open": 1.3, "close": 1.25},
+            ])
+            self.repo.save_bars("510300", [
+                {"trade_date": "2026-10-15", "open": 4.0, "close": 4.1},
+            ])
+        conn = self.repo._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE etf_daily_bar SET created_at = %s WHERE etf_code = %s AND trade_date = %s",
+                    ("2026-10-15 11:02:00", "515220", "2026-10-15"),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        removed = self.repo.delete_preclose_session_bars(datetime(2026, 10, 15, 16, 0))
+        self.assertEqual(removed, 1)
+        coal = self.repo.get_bars("515220")
+        self.assertEqual(
+            [value.strftime("%Y-%m-%d") for value in coal["trade_date"]],
+            ["2026-10-14"],
+        )
+        self.assertEqual(len(self.repo.get_bars("510300")), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
