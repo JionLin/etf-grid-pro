@@ -385,6 +385,19 @@ class UniverseMatrixRepository:
             },
         }
 
+    def codes_for_default_preset(self) -> set:
+        """默认参数矩阵里已经有结果的代码。"""
+        ensure_database(self.database)
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT etf_code FROM universe_matrix_backtest WHERE is_default_preset = 1"
+                )
+                return {str(row["etf_code"]) for row in cur.fetchall() if row.get("etf_code")}
+        finally:
+            conn.close()
+
     def get_validity_map(self) -> Dict[str, Dict[str, bool]]:
         """获取所有标的的周期有效性字典，供首页选品雷达毫秒级过滤成熟度"""
         ensure_database(DEFAULT_DATABASE)

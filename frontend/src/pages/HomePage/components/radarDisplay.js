@@ -101,7 +101,11 @@ export function storageBadge(label) {
   return "本地数据库直出";
 }
 
-export function backfillHint(backfilling, count) {
+export function backfillHint(backfilling, count, bootstrap) {
+  if (bootstrap && bootstrap.active && Number(bootstrap.total) > 0) {
+    const done = Number(bootstrap.done) || 0;
+    return `标的池初始化中 ${done}/${bootstrap.total}`;
+  }
   if (backfilling && !count) {
     return "正在回补日K，完成后会自动出现标的";
   }

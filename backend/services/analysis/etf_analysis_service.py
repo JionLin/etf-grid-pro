@@ -160,6 +160,7 @@ class ETFAnalysisService:
             ),
             "items": items,
             "backfilling": self._pool_backfilling(len(items)),
+            "bootstrap": self._bootstrap_progress(),
             "storage_label": self._storage_label(),
         }
 
@@ -197,10 +198,22 @@ class ETFAnalysisService:
             if fit and fit.get("max_drawdown") is not None:
                 item["max_drawdown"] = fit.get("max_drawdown")
 
+    def _bootstrap_progress(self) -> Dict[str, Any]:
+        try:
+            from repositories.universe_bootstrap_repository import UniverseBootstrapRepository
+
+            progress = UniverseBootstrapRepository().progress()
+        except Exception as exc:
+            logger.warning("读取全市场引导进度失败: %s", exc)
+            progress = {"active": False, "done": 0, "total": 0}
+        return progress
+
     def _pool_backfilling(self, item_count: int) -> bool:
         try:
             from services.data.startup_sync_service import StartupSyncService, pool_is_backfilling
 
+            if self._bootstrap_progress().get("active"):
+                return True
             return pool_is_backfilling(StartupSyncService().get_status(), item_count)
         except Exception as exc:
             logger.warning("读取日K回补状态失败: %s", exc)

@@ -13,6 +13,7 @@ from backend.services.data.akshare_client import (
     POOL_REBUILD_COOLDOWN_SECONDS,
     eastmoney_circuit_open,
     reset_eastmoney_circuit,
+    reset_kline_transport,
 )
 
 
@@ -315,7 +316,11 @@ def test_pool_rebuild_runs_again_after_the_cooldown():
 
 
 def test_eastmoney_failures_open_a_process_circuit_to_tencent():
-    reset_eastmoney_circuit()
+    reset_kline_transport()
+    from backend.services.data import akshare_client as transport
+
+    transport._kline_pacer.interval = 0
+    transport._kline_pacer.jitter = 0
     client = AkShareClient.__new__(AkShareClient)
     hist_calls = {"count": 0}
 
@@ -327,6 +332,7 @@ def test_eastmoney_failures_open_a_process_circuit_to_tencent():
     try:
         with patch("backend.services.data.akshare_client.ak.fund_etf_hist_em", side_effect=disconnect), \
              patch.object(client, "_get_fallback_kline", return_value=fallback) as tencent, \
+             patch("backend.services.data.akshare_client.time.sleep"), \
              patch("backend.services.data.akshare_client.ak.fund_etf_spot_em") as spot:
             for _ in range(3):
                 frame = client._fetch_raw_kline_network("510300", "20200101", "20261014", days=30)
@@ -338,7 +344,7 @@ def test_eastmoney_failures_open_a_process_circuit_to_tencent():
         assert eastmoney_circuit_open()
         spot.assert_not_called()
     finally:
-        reset_eastmoney_circuit()
+        reset_kline_transport()
 
 
 def test_quote_date_label_rolls_back_before_open_and_weekend():

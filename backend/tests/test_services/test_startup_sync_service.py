@@ -88,7 +88,14 @@ def test_two_phase_pipeline_success():
     )
 
     # 模拟需要更新
-    with patch.object(service, "acquire_distributed_lock", return_value=True), \
+    with patch("services.data.startup_sync_service.resume_universe_bootstrap", return_value={
+             "pending": [],
+             "complete": True,
+             "synced_now": False,
+             "done": 0,
+             "total": 0,
+         }), \
+         patch.object(service, "acquire_distributed_lock", return_value=True), \
          patch.object(service, "release_distributed_lock"), \
          patch.object(service, "check_freshness", return_value={
              "expected_date": "2026-09-18",
@@ -120,7 +127,14 @@ def test_two_phase_pipeline_error_handling():
     """测试当同步抛出异常时的容错与状态重置"""
     service = StartupSyncService()
 
-    with patch.object(service, "acquire_distributed_lock", return_value=True), \
+    with patch("services.data.startup_sync_service.resume_universe_bootstrap", return_value={
+             "pending": [],
+             "complete": True,
+             "synced_now": False,
+             "done": 0,
+             "total": 0,
+         }), \
+         patch.object(service, "acquire_distributed_lock", return_value=True), \
          patch.object(service, "release_distributed_lock"), \
          patch.object(service, "check_freshness", side_effect=RuntimeError("数据库网络超时")), \
          patch("services.data.startup_sync_service.connect"):
@@ -145,10 +159,10 @@ def test_empty_universe_backfills_daily_bars_from_market_list():
     mock_matrix_repo = MagicMock()
     mock_client = MagicMock()
     mock_client._load_category_spot_rows.return_value = [
-        {"代码": "sh510300", "名称": "沪深300ETF"},
-        {"代码": "SZ159915", "名称": "创业板ETF"},
+        {"代码": "sh990401", "名称": "沪深300ETF"},
+        {"代码": "SZ990402", "名称": "创业板ETF"},
         {"代码": "not-a-code", "名称": "无效"},
-        {"代码": "sh510300", "名称": "重复"},
+        {"代码": "sh990401", "名称": "重复"},
     ]
     service = StartupSyncService(
         market_repo=MagicMock(),
@@ -160,7 +174,10 @@ def test_empty_universe_backfills_daily_bars_from_market_list():
     mock_sync_service.sync_universe.return_value = {
         "synced": 2,
         "skipped": 0,
-        "results": [{"etf_code": "510300", "rows_added": 10}],
+        "results": [
+            {"etf_code": "990401", "status": "synced", "rows_added": 10},
+            {"etf_code": "990402", "status": "synced", "rows_added": 10},
+        ],
     }
     mock_matrix_service.run_universe_matrix.return_value = []
     mock_matrix_repo.batch_save.return_value = 0
@@ -176,12 +193,44 @@ def test_empty_universe_backfills_daily_bars_from_market_list():
          patch("services.data.startup_sync_service.connect"):
         result = service.run_sync_pipeline(workers=2, force=False)
 
-    assert result["status"] == "success"
+    assert result["status"] == "skipped"
+    assert result["reason"] == "already_up_to_date"
     instruments = mock_sync_service.sync_universe.call_args.kwargs["instruments"]
-    assert [row["etf_code"] for row in instruments] == ["510300", "159915"]
+    assert [row["etf_code"] for row in instruments] == ["990401", "990402"]
     assert instruments[0]["etf_name"] == "沪深300ETF"
     mock_client.build_or_get_etf_pool.assert_called_once_with(force_refresh=True)
     assert service.get_status()["backfilling"] is False
+
+
+def test_fresh_dates_still_refresh_matrix_when_pool_codes_are_missing():
+    from services.data.market_clock import SHANGHAI
+
+    market = MagicMock()
+    market.get_date_range.return_value = {"max_date": "2026-10-14", "min_date": "2020-01-02", "total_count": 1200}
+    matrix = MagicMock()
+    matrix.codes_for_default_preset.return_value = {"510300"}
+    sync = MagicMock()
+    sync.get_shoppable_universe.return_value = [
+        {"etf_code": "510300", "etf_name": "旧"},
+        {"etf_code": "510500", "etf_name": "新"},
+    ]
+    service = StartupSyncService(
+        market_repo=market,
+        matrix_repo=matrix,
+        sync_service=sync,
+        matrix_service=MagicMock(),
+        akshare_client=MagicMock(),
+        bootstrap_repo=MagicMock(),
+    )
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.return_value = {"total": 53, "last_up": "2026-10-14 18:00:00"}
+    moment = datetime(2026, 10, 14, 16, 0, tzinfo=SHANGHAI)
+    with patch("services.data.startup_sync_service.connect", return_value=connection):
+        freshness = service.check_freshness(moment)
+    assert freshness["needs_bar_sync"] is False
+    assert freshness["needs_matrix_refresh"] is True
 
 
 def test_codes_from_spot_rows_and_backfill_hint_flag():

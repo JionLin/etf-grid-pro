@@ -54,12 +54,11 @@ def test_unfinished_today_bar_is_excluded_from_atr_and_turnover():
 
 def test_sync_does_not_store_today_before_close(monkeypatch):
     from backend.services.data import market_clock
+    import services.data.market_clock as used_clock
 
-    monkeypatch.setattr(
-        market_clock,
-        "shanghai_now",
-        lambda: datetime(2026, 10, 15, 11, 0, tzinfo=market_clock.SHANGHAI),
-    )
+    frozen = datetime(2026, 10, 15, 11, 0, tzinfo=market_clock.SHANGHAI)
+    monkeypatch.setattr(market_clock, "shanghai_now", lambda: frozen)
+    monkeypatch.setattr(used_clock, "shanghai_now", lambda: frozen)
     frame = pd.DataFrame({
         "trade_date": [pd.Timestamp("2026-10-14"), pd.Timestamp("2026-10-15")],
         "open": [1.0, 1.0],
@@ -70,7 +69,7 @@ def test_sync_does_not_store_today_before_close(monkeypatch):
         "amount": [1_000_000.0, 9_000_000_000.0],
     })
     client = MagicMock()
-    client._get_fallback_kline.return_value = frame
+    client.fetch_history_kline.return_value = frame
     market_repo = MagicMock()
     market_repo.get_date_range.return_value = {
         "total_count": 0,
@@ -102,7 +101,7 @@ def test_incremental_sync_refetches_when_last_close_is_missing(monkeypatch):
         "amount": [1000.0],
     })
     client = MagicMock()
-    client._get_fallback_kline.return_value = fresh
+    client.fetch_history_kline.return_value = fresh
     market_repo = MagicMock()
     market_repo.get_date_range.return_value = {
         "total_count": 20,
@@ -114,7 +113,7 @@ def test_incremental_sync_refetches_when_last_close_is_missing(monkeypatch):
     result = service.sync_single_etf("515220", is_incremental=True)
     assert result["status"] == "synced"
     market_repo.delete_preclose_session_bars.assert_called_once()
-    client._get_fallback_kline.assert_called_once()
+    client.fetch_history_kline.assert_called_once()
 
     market_repo.get_date_range.return_value["max_date"] = "2026-10-15"
     done = service.sync_single_etf("515220", is_incremental=True)

@@ -195,7 +195,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   const maturity5yCount = maturity.y5;
   const maturity3yCount = maturity.y3;
   const maturityAllCount = maturity.all;
-  const poolBackfillHint = backfillHint(poolData.backfilling, maturityAllCount);
+  const poolBackfillHint = backfillHint(poolData.backfilling, maturityAllCount, poolData.bootstrap);
 
   // 当前成熟度基准池总数与 T+0 动态计数
   const currentMaturityTotal = maturePoolItems.length;

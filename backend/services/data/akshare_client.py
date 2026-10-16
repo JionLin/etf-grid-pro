@@ -1,10 +1,13 @@
 import akshare as ak
 import pandas as pd
 import logging
+import math
+import random
 import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
+from .history_window import CAPPED_PAGE_BARS, history_reaches_window
 from .bar_metrics import (
     INSUFFICIENT_DATA_LABEL,
     drop_unfinished_session_bar,
@@ -33,42 +36,207 @@ logger = logging.getLogger(__name__)
 SPOT_QUOTE_TTL_SECONDS = 45
 SINA_CATEGORY_TIMEOUT_SECONDS = 10
 EASTMONEY_FAILURE_LIMIT = 2
+TENCENT_FAILURE_LIMIT = 3
+SOURCE_PAUSE_SECONDS = 60
+KLINE_MIN_INTERVAL_SECONDS = 0.35
+KLINE_JITTER_SECONDS = 0.25
+BOOTSTRAP_HTTP_SLOTS = 2
 POOL_REBUILD_COOLDOWN_SECONDS = 600
-_eastmoney_lock = threading.Lock()
-_eastmoney_failures = 0
-_eastmoney_open = False
+_TENCENT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://gu.qq.com/",
+    "Accept": "application/json, text/plain, */*",
+}
+
+
+class SourceGate:
+    """连续传输失败后暂停这个源，暂停结束后再试。"""
+
+    def __init__(self, name: str, failure_limit: int, pause_seconds: float):
+        self.name = name
+        self.failure_limit = failure_limit
+        self.pause_seconds = pause_seconds
+        self._lock = threading.Lock()
+        self._consecutive = 0
+        self._paused_until = 0.0
+        self._clock = time.monotonic
+
+    def is_paused(self) -> bool:
+        with self._lock:
+            return self._clock() < self._paused_until
+
+    def pause_remaining(self) -> float:
+        with self._lock:
+            return max(0.0, self._paused_until - self._clock())
+
+    def note_success(self) -> None:
+        with self._lock:
+            if self._clock() < self._paused_until:
+                return
+            self._consecutive = 0
+
+    def note_failure(self) -> bool:
+        """传输失败记一次。达到门槛时开始暂停，并返回真。"""
+        with self._lock:
+            now = self._clock()
+            if now < self._paused_until:
+                return False
+            self._consecutive += 1
+            if self._consecutive < self.failure_limit:
+                return False
+            self._paused_until = now + self.pause_seconds
+            self._consecutive = 0
+            logger.info(
+                "%s连续失败 %s 次，暂停 %ss",
+                self.name,
+                self.failure_limit,
+                int(self.pause_seconds),
+            )
+            return True
+
+    def reset(self) -> None:
+        with self._lock:
+            self._consecutive = 0
+            self._paused_until = 0.0
+
+
+class RequestPacer:
+    """全进程共用的请求间隔，避免同一时刻打出一批 TLS 握手。"""
+
+    def __init__(self, interval: float, jitter: float):
+        self.interval = interval
+        self.jitter = jitter
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        gap = self.interval
+        jitter = self.jitter
+        if gap <= 0 and jitter <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next)
+            self._next = slot + gap + (random.uniform(0, jitter) if jitter > 0 else 0)
+            delay = slot - now
+        if delay > 0:
+            time.sleep(delay)
+
+
+_eastmoney_gate = SourceGate("东方财富", EASTMONEY_FAILURE_LIMIT, SOURCE_PAUSE_SECONDS)
+_tencent_gate = SourceGate("腾讯源", TENCENT_FAILURE_LIMIT, SOURCE_PAUSE_SECONDS)
+_kline_pacer = RequestPacer(KLINE_MIN_INTERVAL_SECONDS, KLINE_JITTER_SECONDS)
+_kline_slots = threading.Semaphore(BOOTSTRAP_HTTP_SLOTS)
+_tencent_sessions: list = []
+_tencent_session_lock = threading.Lock()
 
 
 def eastmoney_circuit_open() -> bool:
-    """东财连续失败后，本进程剩余请求直接走腾讯。"""
-    return _eastmoney_open
+    """东财处于暂停窗口时，日 K 和现货改走腾讯。"""
+    return _eastmoney_gate.is_paused()
+
+
+def eastmoney_pause_remaining() -> float:
+    return _eastmoney_gate.pause_remaining()
 
 
 def note_eastmoney_success() -> None:
-    global _eastmoney_failures
-    with _eastmoney_lock:
-        if not _eastmoney_open:
-            _eastmoney_failures = 0
+    _eastmoney_gate.note_success()
 
 
-def note_eastmoney_failure() -> None:
-    global _eastmoney_failures, _eastmoney_open
-    with _eastmoney_lock:
-        _eastmoney_failures += 1
-        if _eastmoney_failures >= EASTMONEY_FAILURE_LIMIT and not _eastmoney_open:
-            _eastmoney_open = True
-            logger.warning(
-                "东方财富连续失败 %s 次，本进程日K和行情改走腾讯",
-                _eastmoney_failures,
-            )
+def note_eastmoney_failure() -> bool:
+    return _eastmoney_gate.note_failure()
+
+
+def tencent_circuit_open() -> bool:
+    return _tencent_gate.is_paused()
+
+
+def tencent_pause_remaining() -> float:
+    return _tencent_gate.pause_remaining()
+
+
+def note_tencent_success() -> None:
+    _tencent_gate.note_success()
+
+
+def note_tencent_failure() -> bool:
+    return _tencent_gate.note_failure()
 
 
 def reset_eastmoney_circuit() -> None:
-    """测试隔离。运行中的进程不主动闭合熔断。"""
-    global _eastmoney_failures, _eastmoney_open
-    with _eastmoney_lock:
-        _eastmoney_failures = 0
-        _eastmoney_open = False
+    """测试隔离。暂停到时间后会自己恢复。"""
+    _eastmoney_gate.reset()
+
+
+def reset_kline_transport() -> None:
+    """清掉日 K 源的暂停和共用连接。测试隔离用。"""
+    _eastmoney_gate.reset()
+    _tencent_gate.reset()
+    _kline_pacer.interval = KLINE_MIN_INTERVAL_SECONDS
+    _kline_pacer.jitter = KLINE_JITTER_SECONDS
+    _kline_pacer._next = 0.0
+    with _tencent_session_lock:
+        _tencent_sessions.clear()
+
+
+def kline_batch_note(done: int, total: int, failed: int) -> str:
+    """一批引导结束后的一行摘要。"""
+    parts = [f"初始化 {int(done)}/{int(total)}，本批失败 {int(failed)}"]
+    east_left = eastmoney_pause_remaining()
+    tencent_left = tencent_pause_remaining()
+    if east_left > 0:
+        parts.append(f"东财源暂停 {int(math.ceil(east_left))}s")
+    if tencent_left > 0:
+        parts.append(f"腾讯源暂停 {int(math.ceil(tencent_left))}s")
+    return "，".join(parts)
+
+
+def _is_transport_error(exc: BaseException) -> bool:
+    try:
+        import requests
+    except ImportError:
+        requests = None
+    if requests is not None and isinstance(exc, requests.exceptions.RequestException):
+        return True
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return True
+    text = str(exc).lower()
+    return any(token in text for token in ("ssl", "eof", "connection", "timeout", "max retries"))
+
+
+def _backoff_seconds(attempt: int) -> float:
+    return min(8.0, 0.5 * (2 ** attempt)) + random.uniform(0, 0.25)
+
+
+def _new_tencent_session():
+    import requests
+    from requests.adapters import HTTPAdapter
+
+    session = requests.Session()
+    session.trust_env = False
+    session.headers.update(_TENCENT_HEADERS)
+    adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1, max_retries=0)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+def _checkout_tencent_session():
+    """借出一条已带浏览器头的长连接。同时在途不超过两个。"""
+    with _tencent_session_lock:
+        if _tencent_sessions:
+            return _tencent_sessions.pop()
+    return _new_tencent_session()
+
+
+def _checkin_tencent_session(session) -> None:
+    with _tencent_session_lock:
+        if len(_tencent_sessions) < BOOTSTRAP_HTTP_SLOTS:
+            _tencent_sessions.append(session)
 
 
 _SINA_CATEGORY_URL = (
@@ -90,6 +258,38 @@ _SINA_CATEGORY_COLUMNS = [
     "成交量",
     "成交额",
 ]
+
+
+def _frame_min_date(frame: Optional[pd.DataFrame]) -> Optional[str]:
+    if frame is None or frame.empty:
+        return None
+    column = "trade_date" if "trade_date" in frame.columns else None
+    if column is None and "日期" in frame.columns:
+        column = "日期"
+    if column is None:
+        return None
+    values = pd.to_datetime(frame[column], errors="coerce").dropna()
+    if values.empty:
+        return None
+    return values.min().strftime("%Y-%m-%d")
+
+
+def _eastmoney_history_complete(frame: pd.DataFrame, target_start: str) -> bool:
+    """盖住请求起点，或这一页明显不是 640 根满页，就当成东财已经给全了。"""
+    if history_reaches_window(_frame_min_date(frame), target_start):
+        return True
+    return len(frame) < CAPPED_PAGE_BARS
+
+
+def _prefer_longer_history(primary: pd.DataFrame, alternate: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """两段日 K 里留下开始得更早的那一段。"""
+    if alternate is None or alternate.empty:
+        return primary
+    primary_min = _frame_min_date(primary) or "9999-99-99"
+    alternate_min = _frame_min_date(alternate) or "9999-99-99"
+    if alternate_min < primary_min or (alternate_min == primary_min and len(alternate) > len(primary)):
+        return alternate
+    return primary
 
 
 class AkShareClient:
@@ -149,29 +349,100 @@ class AkShareClient:
         return frame
     
     def _fetch_raw_kline_network(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
-        """向网络接口请求原始日 K 线。东财连续失败后，本进程直接走腾讯。"""
-        clean_code = etf_code.split(".")[0]
-        s_date = start_date.replace("-", "")
-        e_date = end_date.replace("-", "")
-        if eastmoney_circuit_open():
-            logger.info("东方财富熔断已打开，日K直接走腾讯 (%s)", clean_code)
-        else:
-            try:
-                df = ak.fund_etf_hist_em(
-                    symbol=clean_code,
-                    period="daily",
-                    start_date=s_date,
-                    end_date=e_date,
-                    adjust="qfq"
-                )
-                if df is not None and not df.empty:
-                    note_eastmoney_success()
-                    return self._convert_akshare_daily_to_tushare_format(df)
-            except Exception as e:
-                note_eastmoney_failure()
-                logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
+        """向网络接口请求原始日 K 线。源暂停时改走另一个源。"""
+        return self.fetch_history_kline(etf_code, start_date=start_date, end_date=end_date, days=days)
 
-        return self._get_fallback_kline(clean_code, days=days, start_date=start_date, end_date=end_date)
+    def fetch_history_kline(
+        self,
+        etf_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days: int = 180,
+    ) -> Optional[pd.DataFrame]:
+        """先东财、再腾讯。传输失败按源退避；连续失败则暂停该源，改试另一个。"""
+        clean_code = str(etf_code).split(".")[0]
+        start_text = start_date or (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_text = end_date or datetime.now().strftime("%Y-%m-%d")
+        s_date = str(start_text).replace("-", "")
+        e_date = str(end_text).replace("-", "")
+        east_error: Optional[BaseException] = None
+        east_candidate: Optional[pd.DataFrame] = None
+        start_day = str(start_text)[:10]
+
+        if not eastmoney_circuit_open():
+            attempts = 0
+            while attempts < EASTMONEY_FAILURE_LIMIT and not eastmoney_circuit_open():
+                try:
+                    _kline_pacer.wait()
+                    _kline_slots.acquire()
+                    try:
+                        df = ak.fund_etf_hist_em(
+                            symbol=clean_code,
+                            period="daily",
+                            start_date=s_date,
+                            end_date=e_date,
+                            adjust="qfq",
+                        )
+                    finally:
+                        _kline_slots.release()
+                    if df is not None and not df.empty:
+                        converted = self._convert_akshare_daily_to_tushare_format(df)
+                        if _eastmoney_history_complete(converted, start_day):
+                            note_eastmoney_success()
+                            converted.attrs["history_saturated"] = True
+                            return converted
+                        east_candidate = converted
+                    break
+                except Exception as exc:
+                    east_error = exc
+                    logger.debug("东财日K失败 (%s): %s", clean_code, exc)
+                    if not _is_transport_error(exc):
+                        break
+                    opened = note_eastmoney_failure()
+                    attempts += 1
+                    if opened or eastmoney_circuit_open() or attempts >= EASTMONEY_FAILURE_LIMIT:
+                        break
+                    time.sleep(_backoff_seconds(attempts - 1))
+
+        tencent_error: Optional[BaseException] = None
+        if not tencent_circuit_open():
+            attempts = 0
+            while attempts < TENCENT_FAILURE_LIMIT and not tencent_circuit_open():
+                try:
+                    frame = self._get_fallback_kline(
+                        clean_code,
+                        days=days,
+                        start_date=start_text,
+                        end_date=end_text,
+                    )
+                    if frame is not None and not frame.empty:
+                        note_tencent_success()
+                        return _prefer_longer_history(frame, east_candidate)
+                    if east_candidate is not None:
+                        east_candidate.attrs["history_saturated"] = False
+                        return east_candidate
+                    return None
+                except Exception as exc:
+                    tencent_error = exc
+                    logger.debug("备用K线获取失败 (%s): %s", clean_code, exc)
+                    if not _is_transport_error(exc):
+                        break
+                    opened = note_tencent_failure()
+                    attempts += 1
+                    if opened or tencent_circuit_open() or attempts >= TENCENT_FAILURE_LIMIT:
+                        break
+                    time.sleep(_backoff_seconds(attempts - 1))
+
+        if east_candidate is not None:
+            east_candidate.attrs["history_saturated"] = False
+            return east_candidate
+        if eastmoney_circuit_open() and tencent_circuit_open():
+            raise ConnectionError("日K源都在暂停")
+        if tencent_error is not None and _is_transport_error(tencent_error):
+            raise tencent_error
+        if east_error is not None and _is_transport_error(east_error):
+            raise east_error
+        return None
 
     def _sync_and_fill_kline_lake(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
         """
@@ -224,8 +495,8 @@ class AkShareClient:
         curr_min = local_range_now["min_date"]
         if est_target_days > curr_count and curr_min and curr_min > norm_start:
             logger.info(f"→ 检测到历史端跨度缺口: 需要 {est_target_days} 交易日，本地仅 {curr_count} 交易日，向前回溯补齐")
-            hist_df = self._get_fallback_kline(
-                clean_code, days=days, start_date=start_date, end_date=end_date
+            hist_df = self.fetch_history_kline(
+                clean_code, start_date=start_date, end_date=end_date, days=days
             )
             if hist_df is not None and not hist_df.empty:
                 self.market_repo.save_bars(clean_code, hist_df)
@@ -921,7 +1192,6 @@ class AkShareClient:
     ) -> Optional[pd.DataFrame]:
         """备用K线源 (腾讯财经) - 按日历起止分段拉取，禁止按估算交易日截尾。"""
         try:
-            import requests
             code = etf_code.split('.')[0]
             prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
             bound_start = self._normalize_calendar_date(start_date)
@@ -931,41 +1201,54 @@ class AkShareClient:
             if bound_end is None:
                 bound_end = datetime.now().strftime("%Y-%m-%d")
 
-            session = requests.Session()
-            session.trust_env = False  # 避免本地代理环境干扰
-            
             all_raw_data = []
             current_end = ""
             chunk_size = 640
-            max_loops = 8  # 最多拉取8轮，覆盖 5 年日历跨度
+            max_loops = 8  # 每页 640，8 页够覆盖 5 年
+            saturated = False
             
             for _ in range(max_loops):
                 if not current_end:
                     url = f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{chunk_size},qfq'
                 else:
                     url = f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,2015-01-01,{current_end},{chunk_size},qfq'
-                
-                res = session.get(url, timeout=6).json()
+
+                _kline_pacer.wait()
+                _kline_slots.acquire()
+                session = None
+                try:
+                    session = _checkout_tencent_session()
+                    res = session.get(url, timeout=8).json()
+                finally:
+                    if session is not None:
+                        _checkin_tencent_session(session)
+                    _kline_slots.release()
                 item = res.get('data', {}).get(f'{prefix}{code}', {})
                 raw_data = item.get('qfqday', item.get('day', []))
                 if not raw_data:
+                    saturated = True
                     break
-                
-                # 若是向前拉取，raw_data 的最后一条与 current_end 日期重合，去重
-                if current_end and raw_data and raw_data[-1][0] == current_end:
-                    raw_data = raw_data[:-1]
-                
+
+                # 腾讯有时最新在前。游标用本页最早的一天，不能用第一行。
+                if current_end:
+                    raw_data = [
+                        row for row in raw_data
+                        if str(row[0])[:10] != str(current_end)[:10]
+                    ]
                 if not raw_data:
+                    saturated = True
                     break
-                
-                all_raw_data = raw_data + all_raw_data
-                earliest_date = raw_data[0][0]
+
+                earliest_date = min(str(row[0])[:10] for row in raw_data)
+                all_raw_data.extend(raw_data)
                 if earliest_date == current_end:
+                    saturated = True
                     break
                 current_end = earliest_date
-                
+
                 # 单批明显不足 640 表示触及上市首日；已覆盖日历起点则停止
                 if len(raw_data) < chunk_size - 10 or earliest_date <= bound_start:
+                    saturated = True
                     break
             
             if not all_raw_data:
@@ -975,6 +1258,7 @@ class AkShareClient:
                 row for row in all_raw_data
                 if bound_start <= str(row[0])[:10] <= bound_end
             ]
+            all_raw_data.sort(key=lambda row: str(row[0])[:10])
             if not all_raw_data:
                 return None
             
@@ -998,9 +1282,13 @@ class AkShareClient:
                     'amount': calc_amount,
                 })
             records = self.pct_change_versus_previous_close(records)
-            return pd.DataFrame(records).reset_index(drop=True)
-        except Exception as e:
-            logger.warning(f"备用K线获取失败: {str(e)}")
+            frame = pd.DataFrame(records).reset_index(drop=True)
+            frame.attrs["history_saturated"] = saturated
+            return frame
+        except Exception as exc:
+            logger.debug("备用K线获取失败: %s", exc)
+            if _is_transport_error(exc):
+                raise
             return None
 
     _CASH_MARKERS = ('货币', '日利', '添益', '快钱', '快线', '财富宝')
@@ -1327,6 +1615,18 @@ class AkShareClient:
         self._remember_quote_date(code, updated["quote_date"])
         updates.append((code, last["close"], last["pct_change"]))
 
+    def _bootstrap_in_progress(self) -> bool:
+        """引导未完成时，首页不要为了刷新价格再打一遍全市场行情。"""
+        try:
+            from repositories.universe_bootstrap_repository import UniverseBootstrapRepository
+        except ImportError:
+            from backend.repositories.universe_bootstrap_repository import UniverseBootstrapRepository
+        try:
+            return bool(UniverseBootstrapRepository().progress().get("active"))
+        except Exception as exc:
+            logger.warning("读取全市场引导进度失败: %s", exc)
+            return False
+
     def _pool_rebuild_on_cooldown(self) -> bool:
         """池子不满 20 只时，首页轮询不能每次都重拉全市场列表。"""
         last = float(getattr(self, "_pool_rebuild_at", 0.0) or 0.0)
@@ -1344,6 +1644,16 @@ class AkShareClient:
         """
         获取或构建全市场做 T 标的池（带月均 >= 3000 万、上市满 3 年、ATR >= 1.5% 三重品质护城河清洗，本地持久化）
         """
+        if not force_refresh and self._bootstrap_in_progress():
+            existing = self.pool_repo.get_pool(
+                min_amount_10k=min_amount_10k,
+                min_ma20_amount_10k=min_ma20_amount_10k,
+                min_atr_pct=min_atr_pct,
+                limit=500
+            )
+            logger.info("全市场日K仍在引导，先返回已落库的 %s 只", len(existing or []))
+            return self.attach_quote_dates(list(existing or []))
+
         if not force_refresh:
             existing = self.pool_repo.get_pool(
                 min_amount_10k=min_amount_10k,
