@@ -51,7 +51,7 @@ class TestAKShareClientFallbackPagination(unittest.TestCase):
 
         def fake_get(url, timeout=6):
             mock_resp = MagicMock()
-            if "2024-01-22" in url:
+            if ",2015-01-01," in url:
                 mock_resp.json.return_value = {
                     "data": {"sh515220": {"qfqday": batch2}}
                 }

@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
+from .history_window import CAPPED_PAGE_BARS, history_reaches_window
 from .bar_metrics import (
     INSUFFICIENT_DATA_LABEL,
     drop_unfinished_session_bar,
@@ -259,6 +260,38 @@ _SINA_CATEGORY_COLUMNS = [
 ]
 
 
+def _frame_min_date(frame: Optional[pd.DataFrame]) -> Optional[str]:
+    if frame is None or frame.empty:
+        return None
+    column = "trade_date" if "trade_date" in frame.columns else None
+    if column is None and "日期" in frame.columns:
+        column = "日期"
+    if column is None:
+        return None
+    values = pd.to_datetime(frame[column], errors="coerce").dropna()
+    if values.empty:
+        return None
+    return values.min().strftime("%Y-%m-%d")
+
+
+def _eastmoney_history_complete(frame: pd.DataFrame, target_start: str) -> bool:
+    """盖住请求起点，或这一页明显不是 640 根满页，就当成东财已经给全了。"""
+    if history_reaches_window(_frame_min_date(frame), target_start):
+        return True
+    return len(frame) < CAPPED_PAGE_BARS
+
+
+def _prefer_longer_history(primary: pd.DataFrame, alternate: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """两段日 K 里留下开始得更早的那一段。"""
+    if alternate is None or alternate.empty:
+        return primary
+    primary_min = _frame_min_date(primary) or "9999-99-99"
+    alternate_min = _frame_min_date(alternate) or "9999-99-99"
+    if alternate_min < primary_min or (alternate_min == primary_min and len(alternate) > len(primary)):
+        return alternate
+    return primary
+
+
 class AkShareClient:
     """AkShare数据客户端 - 与TushareClient接口完全兼容"""
     
@@ -333,6 +366,8 @@ class AkShareClient:
         s_date = str(start_text).replace("-", "")
         e_date = str(end_text).replace("-", "")
         east_error: Optional[BaseException] = None
+        east_candidate: Optional[pd.DataFrame] = None
+        start_day = str(start_text)[:10]
 
         if not eastmoney_circuit_open():
             attempts = 0
@@ -351,8 +386,12 @@ class AkShareClient:
                     finally:
                         _kline_slots.release()
                     if df is not None and not df.empty:
-                        note_eastmoney_success()
-                        return self._convert_akshare_daily_to_tushare_format(df)
+                        converted = self._convert_akshare_daily_to_tushare_format(df)
+                        if _eastmoney_history_complete(converted, start_day):
+                            note_eastmoney_success()
+                            converted.attrs["history_saturated"] = True
+                            return converted
+                        east_candidate = converted
                     break
                 except Exception as exc:
                     east_error = exc
@@ -378,7 +417,10 @@ class AkShareClient:
                     )
                     if frame is not None and not frame.empty:
                         note_tencent_success()
-                        return frame
+                        return _prefer_longer_history(frame, east_candidate)
+                    if east_candidate is not None:
+                        east_candidate.attrs["history_saturated"] = False
+                        return east_candidate
                     return None
                 except Exception as exc:
                     tencent_error = exc
@@ -391,6 +433,9 @@ class AkShareClient:
                         break
                     time.sleep(_backoff_seconds(attempts - 1))
 
+        if east_candidate is not None:
+            east_candidate.attrs["history_saturated"] = False
+            return east_candidate
         if eastmoney_circuit_open() and tencent_circuit_open():
             raise ConnectionError("日K源都在暂停")
         if tencent_error is not None and _is_transport_error(tencent_error):
@@ -1159,7 +1204,8 @@ class AkShareClient:
             all_raw_data = []
             current_end = ""
             chunk_size = 640
-            max_loops = 8  # 最多拉取8轮，覆盖 5 年日历跨度
+            max_loops = 8  # 每页 640，8 页够覆盖 5 年
+            saturated = False
             
             for _ in range(max_loops):
                 if not current_end:
@@ -1180,23 +1226,29 @@ class AkShareClient:
                 item = res.get('data', {}).get(f'{prefix}{code}', {})
                 raw_data = item.get('qfqday', item.get('day', []))
                 if not raw_data:
+                    saturated = True
                     break
-                
-                # 若是向前拉取，raw_data 的最后一条与 current_end 日期重合，去重
-                if current_end and raw_data and raw_data[-1][0] == current_end:
-                    raw_data = raw_data[:-1]
-                
+
+                # 腾讯有时最新在前。游标用本页最早的一天，不能用第一行。
+                if current_end:
+                    raw_data = [
+                        row for row in raw_data
+                        if str(row[0])[:10] != str(current_end)[:10]
+                    ]
                 if not raw_data:
+                    saturated = True
                     break
-                
-                all_raw_data = raw_data + all_raw_data
-                earliest_date = raw_data[0][0]
+
+                earliest_date = min(str(row[0])[:10] for row in raw_data)
+                all_raw_data.extend(raw_data)
                 if earliest_date == current_end:
+                    saturated = True
                     break
                 current_end = earliest_date
-                
+
                 # 单批明显不足 640 表示触及上市首日；已覆盖日历起点则停止
                 if len(raw_data) < chunk_size - 10 or earliest_date <= bound_start:
+                    saturated = True
                     break
             
             if not all_raw_data:
@@ -1206,6 +1258,7 @@ class AkShareClient:
                 row for row in all_raw_data
                 if bound_start <= str(row[0])[:10] <= bound_end
             ]
+            all_raw_data.sort(key=lambda row: str(row[0])[:10])
             if not all_raw_data:
                 return None
             
@@ -1229,7 +1282,9 @@ class AkShareClient:
                     'amount': calc_amount,
                 })
             records = self.pct_change_versus_previous_close(records)
-            return pd.DataFrame(records).reset_index(drop=True)
+            frame = pd.DataFrame(records).reset_index(drop=True)
+            frame.attrs["history_saturated"] = saturated
+            return frame
         except Exception as exc:
             logger.debug("备用K线获取失败: %s", exc)
             if _is_transport_error(exc):

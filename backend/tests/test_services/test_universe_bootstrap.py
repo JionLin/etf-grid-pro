@@ -18,7 +18,7 @@ def _wipe(repo: UniverseBootstrapRepository) -> None:
 def _bars(code: str) -> None:
     MarketDataRepository().save_bars(code, [
         {
-            "trade_date": "2026-09-01",
+            "trade_date": "2020-01-02",
             "open": 1.0,
             "close": 1.1,
             "high": 1.2,
@@ -338,6 +338,65 @@ def test_startup_reopens_false_empties_then_leaves_a_fresh_empty_alone():
     again = resume_universe_bootstrap(
         bootstrap_repo=repo,
         market_repo=MarketDataRepository(),
+        sync_service=sync_service,
+        list_loader=lambda: instruments,
+        pool_builder=MagicMock(),
+    )
+    assert again["complete"] is True
+    sync_service.sync_universe.assert_not_called()
+    _wipe(repo)
+
+
+def test_short_history_is_backfilled_once_then_left_alone():
+    repo = UniverseBootstrapRepository()
+    _wipe(repo)
+    market = MarketDataRepository()
+    market.save_bars("990471", [{
+        "trade_date": "2024-06-03",
+        "open": 1.0,
+        "close": 1.1,
+        "high": 1.2,
+        "low": 0.9,
+        "vol": 1000,
+        "amount": 110000,
+        "pct_chg": 1.0,
+    }])
+    _bars("990472")
+    instruments = [
+        {"etf_code": "990471", "etf_name": "只有近端"},
+        {"etf_code": "990472", "etf_name": "已盖住五年"},
+    ]
+    repo.prepare(instruments, {"990471", "990472"})
+    repo.record_result({"etf_code": "990471", "status": "synced", "history_settled": False})
+    repo.record_result({"etf_code": "990472", "status": "synced", "history_settled": True})
+    assert repo.is_complete() is True
+
+    sync_service = MagicMock()
+    sync_service.sync_universe.return_value = {
+        "synced": 1,
+        "skipped": 0,
+        "failed_count": 0,
+        "results": [{
+            "etf_code": "990471",
+            "status": "synced",
+            "history_settled": True,
+        }],
+    }
+    outcome = resume_universe_bootstrap(
+        bootstrap_repo=repo,
+        market_repo=market,
+        sync_service=sync_service,
+        list_loader=lambda: instruments,
+        pool_builder=MagicMock(),
+    )
+    called = [row["etf_code"] for row in sync_service.sync_universe.call_args.kwargs["instruments"]]
+    assert called == ["990471"]
+    assert outcome["complete"] is True
+
+    sync_service.sync_universe.reset_mock()
+    again = resume_universe_bootstrap(
+        bootstrap_repo=repo,
+        market_repo=market,
         sync_service=sync_service,
         list_loader=lambda: instruments,
         pool_builder=MagicMock(),

@@ -202,6 +202,37 @@ def test_empty_universe_backfills_daily_bars_from_market_list():
     assert service.get_status()["backfilling"] is False
 
 
+def test_fresh_dates_still_refresh_matrix_when_pool_codes_are_missing():
+    from services.data.market_clock import SHANGHAI
+
+    market = MagicMock()
+    market.get_date_range.return_value = {"max_date": "2026-10-14", "min_date": "2020-01-02", "total_count": 1200}
+    matrix = MagicMock()
+    matrix.codes_for_default_preset.return_value = {"510300"}
+    sync = MagicMock()
+    sync.get_shoppable_universe.return_value = [
+        {"etf_code": "510300", "etf_name": "旧"},
+        {"etf_code": "510500", "etf_name": "新"},
+    ]
+    service = StartupSyncService(
+        market_repo=market,
+        matrix_repo=matrix,
+        sync_service=sync,
+        matrix_service=MagicMock(),
+        akshare_client=MagicMock(),
+        bootstrap_repo=MagicMock(),
+    )
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchone.return_value = {"total": 53, "last_up": "2026-10-14 18:00:00"}
+    moment = datetime(2026, 10, 14, 16, 0, tzinfo=SHANGHAI)
+    with patch("services.data.startup_sync_service.connect", return_value=connection):
+        freshness = service.check_freshness(moment)
+    assert freshness["needs_bar_sync"] is False
+    assert freshness["needs_matrix_refresh"] is True
+
+
 def test_codes_from_spot_rows_and_backfill_hint_flag():
     assert codes_from_spot_rows([{"代码": "sh512010", "名称": "医药ETF"}]) == [
         {"etf_code": "512010", "etf_name": "医药ETF"}

@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set
 
+from services.data.history_window import history_reaches_window
+
 from .mysql_connection import DEFAULT_DATABASE, connect
 from .mysql_schema import ensure_database
 
@@ -87,8 +89,10 @@ class UniverseBootstrapRepository:
         self,
         instruments: List[Dict[str, str]],
         codes_with_bars: Iterable[str],
+        spans: Optional[Dict[str, Dict[str, Any]]] = None,
+        target_start: Optional[str] = None,
     ) -> List[Dict[str, str]]:
-        """按最新名单对齐进度。已有日 K 的代码标成 synced，不重新拉取。"""
+        """按最新名单对齐进度。日 K 已经盖住近 5 年的不再拉取，只有最近一截的改回待补。"""
         latest = []
         seen = set()
         for item in instruments or []:
@@ -102,12 +106,20 @@ class UniverseBootstrapRepository:
             return self.pending_instruments()
 
         covered: Set[str] = {str(code) for code in (codes_with_bars or [])}
+        span_map = spans or {}
         now = _now()
+        reopened: List[str] = []
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT etf_code, status FROM universe_bootstrap_code")
-                existing = {row["etf_code"]: row["status"] for row in cursor.fetchall()}
+                cursor.execute(
+                    "SELECT etf_code, status, history_settled FROM universe_bootstrap_code"
+                )
+                existing = {}
+                settled = {}
+                for row in cursor.fetchall():
+                    existing[row["etf_code"]] = row["status"]
+                    settled[row["etf_code"]] = int(row.get("history_settled") or 0)
                 keep = [item["etf_code"] for item in latest]
                 placeholders = ",".join(["%s"] * len(keep))
                 cursor.execute(
@@ -117,7 +129,19 @@ class UniverseBootstrapRepository:
                 for item in latest:
                     code = item["etf_code"]
                     previous = existing.get(code)
-                    if previous in _DONE:
+                    span = span_map.get(code) or {}
+                    reaches = history_reaches_window(span.get("min_date"), target_start)
+                    needs_history = bool(
+                        target_start
+                        and code in covered
+                        and not settled.get(code)
+                        and not reaches
+                    )
+                    if needs_history:
+                        status = _PENDING
+                        if previous == _SYNCED:
+                            reopened.append(code)
+                    elif previous in _DONE:
                         status = previous
                     elif code in covered:
                         status = _SYNCED
@@ -138,6 +162,8 @@ class UniverseBootstrapRepository:
             conn.commit()
         finally:
             conn.close()
+        if reopened:
+            logger.info("日K没有覆盖近5年，改回待补 %s 只", len(reopened))
         return self.pending_instruments()
 
     def recheck_barless_empties(self, codes_with_bars: Iterable[str]) -> List[str]:
@@ -220,19 +246,24 @@ class UniverseBootstrapRepository:
             status = _EMPTY
         else:
             return
+        settled_flag = None
+        if "history_settled" in (result or {}):
+            settled_flag = 1 if result.get("history_settled") else 0
         now = _now()
         conn = self._connect()
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO universe_bootstrap_code (etf_code, etf_name, status, updated_at)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO universe_bootstrap_code (
+                        etf_code, etf_name, status, updated_at, history_settled
+                    ) VALUES (%s, %s, %s, %s, COALESCE(%s, 0))
                     ON DUPLICATE KEY UPDATE
                         status = VALUES(status),
-                        updated_at = VALUES(updated_at)
+                        updated_at = VALUES(updated_at),
+                        history_settled = COALESCE(%s, history_settled)
                     """,
-                    (code, code, status, now),
+                    (code, code, status, now, settled_flag, settled_flag),
                 )
                 self._recount(cursor, now)
             conn.commit()

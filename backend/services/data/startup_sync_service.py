@@ -15,6 +15,7 @@ from repositories.mysql_connection import DEFAULT_DATABASE, connect
 from repositories.universe_matrix_repository import UniverseMatrixRepository
 from services.analysis.universe_matrix_backtest_service import UniverseMatrixBacktestService
 from services.data.akshare_client import AkShareClient, kline_batch_note
+from services.data.history_window import five_year_bounds
 from services.data.market_clock import (
     as_shanghai,
     expected_settled_date,
@@ -40,6 +41,28 @@ def pool_is_backfilling(status: Optional[Dict[str, Any]], item_count: int) -> bo
     return bool(snapshot.get("backfilling"))
 
 
+def _matrix_missing_pool_codes(service) -> set:
+    """标的池里有、默认回测矩阵里还没有的代码。"""
+    try:
+        pool = service.sync_service.get_shoppable_universe()
+    except Exception as exc:
+        logger.warning("读取标的池名单失败，无法核对成熟度覆盖: %s", exc)
+        return set()
+    if not isinstance(pool, list):
+        return set()
+    pool_codes = {str(item.get("etf_code")) for item in pool if item.get("etf_code")}
+    if not pool_codes:
+        return set()
+    try:
+        covered = service.matrix_repo.codes_for_default_preset()
+    except Exception as exc:
+        logger.warning("读取回测矩阵名单失败: %s", exc)
+        return pool_codes
+    if not isinstance(covered, set):
+        return set()
+    return pool_codes - covered
+
+
 def resume_universe_bootstrap(
     *,
     bootstrap_repo,
@@ -55,6 +78,10 @@ def resume_universe_bootstrap(
     reopened = bootstrap_repo.recheck_barless_empties(bars)
     if reopened:
         logger.info("空行情回查 %s 只，已改回待拉取", len(reopened))
+    spans = market_repo.bar_spans()
+    if not isinstance(spans, dict):
+        spans = None
+    target_start = five_year_bounds()[0] if spans is not None else None
     saved = bootstrap_repo.saved_instruments()
     latest = None
     try:
@@ -72,7 +99,12 @@ def resume_universe_bootstrap(
             "reason": "empty_market_list",
         }
 
-    pending = bootstrap_repo.prepare(instruments, bars)
+    pending = bootstrap_repo.prepare(
+        instruments,
+        bars,
+        spans=spans,
+        target_start=target_start,
+    )
     progress = bootstrap_repo.progress()
     if not pending:
         return {
@@ -240,6 +272,12 @@ class StartupSyncService:
         except Exception as e:
             logger.warning("查询回测矩阵状态异常: %s", e)
             needs_matrix_refresh = True
+
+        if not needs_matrix_refresh:
+            missing = _matrix_missing_pool_codes(self)
+            if missing:
+                logger.info("回测矩阵还缺 %s 只标的池代码，需要重算成熟度", len(missing))
+                needs_matrix_refresh = True
 
         return {
             "expected_date": expected_date,

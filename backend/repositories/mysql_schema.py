@@ -97,6 +97,7 @@ _STATEMENTS = (
         etf_name VARCHAR(128) NOT NULL COMMENT '名单上的名称',
         status VARCHAR(16) NOT NULL COMMENT 'pending待拉取，synced已有日K，empty源站无行情',
         updated_at VARCHAR(32) NULL COMMENT '最近写入时间，东八区本地时间字符串',
+        history_settled TINYINT NOT NULL DEFAULT 0 COMMENT '1表示日K已经盖住上市以来或近5年，不必再向前补',
         PRIMARY KEY (etf_code)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全市场日K引导的逐代码进度'
     """,
@@ -481,6 +482,35 @@ def ensure_bootstrap_recheck_column(cursor, database: Optional[str] = None) -> N
         )
 
 
+def ensure_bootstrap_history_column(cursor, database: Optional[str] = None) -> None:
+    """旧库补上日 K 是否已经补全的标记。已有这一列时不改数据。"""
+    if is_sqlite():
+        cursor.execute("PRAGMA table_info(universe_bootstrap_code)")
+        names = {row["name"] for row in cursor.fetchall()}
+        if "history_settled" not in names:
+            cursor.execute(
+                "ALTER TABLE universe_bootstrap_code "
+                "ADD COLUMN history_settled INTEGER NOT NULL DEFAULT 0"
+            )
+        return
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'universe_bootstrap_code'
+          AND COLUMN_NAME = 'history_settled'
+        """,
+        (database or DEFAULT_DATABASE,),
+    )
+    if cursor.fetchone() is None:
+        cursor.execute(
+            """
+            ALTER TABLE universe_bootstrap_code
+            ADD COLUMN history_settled TINYINT NOT NULL DEFAULT 0
+            COMMENT '1表示日K已经盖住上市以来或近5年，不必再向前补'
+            """
+        )
+
+
 def ensure_tables(database: Optional[str] = None) -> None:
     conn = connect(database)
     try:
@@ -494,6 +524,7 @@ def ensure_tables(database: Optional[str] = None) -> None:
                 else:
                     cursor.execute(statement)
             ensure_bootstrap_recheck_column(cursor, database)
+            ensure_bootstrap_history_column(cursor, database)
         conn.commit()
     finally:
         conn.close()

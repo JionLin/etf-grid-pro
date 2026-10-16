@@ -92,6 +92,91 @@ def test_fallback_ssl_is_debug_and_reraised(caplog):
         reset_kline_transport()
 
 
+def test_tencent_paginates_newest_first_pages_back_to_five_years():
+    _quiet_pacer()
+    client = AkShareClient.__new__(AkShareClient)
+    recent = list(pd.bdate_range("2024-01-02", periods=640))
+    older = list(pd.bdate_range("2021-06-01", periods=200))
+    page_new = [[day.strftime("%Y-%m-%d"), "1", "1.1", "1.2", "0.9", "100"] for day in reversed(recent)]
+    page_old = [[day.strftime("%Y-%m-%d"), "1", "1.1", "1.2", "0.9", "100"] for day in reversed(older)]
+
+    def fake_get(url, timeout=8):
+        response = MagicMock()
+        page = page_old if ",2015-01-01," in url else page_new
+        response.json.return_value = {"data": {"sh510300": {"qfqday": page}}}
+        return response
+
+    try:
+        with patch("requests.Session") as session_cls:
+            session = MagicMock()
+            session.get.side_effect = fake_get
+            session_cls.return_value = session
+            frame = client._get_fallback_kline(
+                "510300",
+                start_date="2021-06-01",
+                end_date="2026-10-14",
+            )
+        assert frame is not None
+        assert frame.iloc[0]["trade_date"].strftime("%Y-%m-%d") == "2021-06-01"
+        assert len(frame) > 640
+        assert frame.attrs["history_saturated"] is True
+        assert session.get.call_count == 2
+    finally:
+        reset_kline_transport()
+
+
+def test_capped_eastmoney_page_continues_to_tencent():
+    _quiet_pacer()
+    client = AkShareClient.__new__(AkShareClient)
+    capped = pd.DataFrame({
+        "trade_date": pd.bdate_range("2024-01-02", periods=640),
+        "open": 1.0,
+        "close": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "vol": 1.0,
+        "amount": 1.0,
+    })
+    older = capped.iloc[:30].copy()
+    older["trade_date"] = pd.bdate_range("2021-01-04", periods=30)
+    older.attrs["history_saturated"] = True
+    try:
+        with patch("backend.services.data.akshare_client.ak.fund_etf_hist_em", return_value=pd.DataFrame({"日期": ["2024-01-02"]})), \
+             patch.object(client, "_convert_akshare_daily_to_tushare_format", return_value=capped), \
+             patch.object(client, "_get_fallback_kline", return_value=older) as tencent, \
+             patch("backend.services.data.akshare_client.time.sleep"):
+            result = client.fetch_history_kline("510300", "2021-01-01", "2026-10-14")
+        assert result is older
+        tencent.assert_called()
+    finally:
+        reset_kline_transport()
+
+
+def test_complete_eastmoney_history_skips_tencent():
+    _quiet_pacer()
+    client = AkShareClient.__new__(AkShareClient)
+    full = pd.DataFrame({
+        "trade_date": pd.bdate_range("2020-06-01", periods=40),
+        "open": 1.0,
+        "close": 1.0,
+        "high": 1.0,
+        "low": 1.0,
+        "vol": 1.0,
+        "amount": 1.0,
+    })
+    try:
+        with patch("backend.services.data.akshare_client.ak.fund_etf_hist_em", return_value=pd.DataFrame({"日期": ["2020-06-01"]})), \
+             patch.object(client, "_convert_akshare_daily_to_tushare_format", return_value=full), \
+             patch.object(client, "_get_fallback_kline") as tencent, \
+             patch("backend.services.data.akshare_client.time.sleep"):
+            result = client.fetch_history_kline("510300", "2021-01-01", "2026-10-14")
+        assert result is full
+        assert result.attrs["history_saturated"] is True
+        tencent.assert_not_called()
+    finally:
+        reset_kline_transport()
+
+
 def test_sync_keeps_ssl_error_instead_of_empty_payload():
     client = MagicMock()
     client.fetch_history_kline.side_effect = requests.exceptions.SSLError("UNEXPECTED_EOF_WHILE_READING")

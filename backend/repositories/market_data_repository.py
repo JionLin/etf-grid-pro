@@ -110,8 +110,37 @@ class MarketDataRepository:
             float(row.get("pct_chg", 0.0) or 0.0),
         )
 
+    def bar_spans(self) -> Optional[Dict[str, Dict[str, Any]]]:
+        """每只代码的最早交易日和根数。查不到时返回 None，避免把全市场误判成历史太短。"""
+        try:
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT etf_code, MIN(trade_date) AS min_date, COUNT(*) AS total
+                        FROM etf_daily_bar GROUP BY etf_code
+                        """
+                    )
+                    rows = cursor.fetchall()
+            finally:
+                conn.close()
+            spans = {}
+            for row in rows:
+                code = str(row.get("etf_code") or "")
+                if not code:
+                    continue
+                spans[code] = {
+                    "min_date": row.get("min_date"),
+                    "total_count": int(row.get("total") or 0),
+                }
+            return spans
+        except Exception as exc:
+            logger.warning("读取日 K 跨度失败: %s", exc)
+            return None
+
     def codes_with_bars(self) -> set:
-        """已经有至少一根日 K 的代码。引导续传时这些代码不再整段重拉。"""
+        """已经有至少一根日 K 的代码。历史太短的仍会在引导里向前补。"""
         try:
             conn = self._connect()
             try:

@@ -9,7 +9,8 @@ from repositories.etf_pool_repository import ETFPoolRepository
 from repositories.market_data_repository import MarketDataRepository
 from services.data.akshare_client import AkShareClient
 from services.data.bar_metrics import drop_unfinished_session_bar
-from services.data.market_clock import SHANGHAI, as_shanghai, last_completed_trading_day
+from services.data.history_window import five_year_bounds, history_reaches_window
+from services.data.market_clock import last_completed_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +34,7 @@ class UniverseBarSyncService:
 
     def get_default_5y_dates(self) -> Tuple[str, str]:
         """计算默认 5 年起止日期 (YYYY-MM-DD)"""
-        now = as_shanghai(datetime.now(SHANGHAI)).replace(tzinfo=None)
-        end_date = now.strftime("%Y-%m-%d")
-        start_date = (now - timedelta(days=5 * 365 + 30)).strftime("%Y-%m-%d")
-        return start_date, end_date
+        return five_year_bounds()
 
     def sync_single_etf(
         self,
@@ -66,9 +64,8 @@ class UniverseBarSyncService:
         if not force_reload and local_count > 0 and local_max:
             latest_text = str(local_max)[:10]
             latest_dt = datetime.strptime(latest_text, "%Y-%m-%d")
-            if latest_text == completed and (
-                is_incremental or local_count >= 1000 or (local_min and local_min <= target_start)
-            ):
+            reached = history_reaches_window(local_min, target_start)
+            if latest_text == completed and (is_incremental or reached):
                 return {
                     "etf_code": clean_code,
                     "status": "skipped",
@@ -77,6 +74,7 @@ class UniverseBarSyncService:
                     "min_date": local_min,
                     "max_date": local_max,
                     "error": None,
+                    "history_settled": reached,
                 }
             if is_incremental:
                 if latest_text > completed:
@@ -94,11 +92,13 @@ class UniverseBarSyncService:
                 end_date=target_end,
             )
 
+            saturated = bool(getattr(df, "attrs", {}).get("history_saturated")) if df is not None else False
             if df is not None and not df.empty:
                 df = drop_unfinished_session_bar(df)
             if df is not None and not df.empty:
                 saved = self.market_repo.save_bars(clean_code, df)
                 updated_stat = self.market_repo.get_date_range(clean_code)
+                reached_after = history_reaches_window(updated_stat.get("min_date"), target_start)
                 return {
                     "etf_code": clean_code,
                     "status": "synced",
@@ -107,6 +107,7 @@ class UniverseBarSyncService:
                     "min_date": updated_stat.get("min_date"),
                     "max_date": updated_stat.get("max_date"),
                     "error": None,
+                    "history_settled": reached_after or saturated,
                 }
             if is_incremental:
                 return {
